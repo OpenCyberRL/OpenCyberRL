@@ -80,11 +80,38 @@ def load_world(task: "Task") -> dict:
 
     A dict is returned unchanged; a string is read as YAML relative to the
     task's source directory (Task.dir); None becomes an empty spec.
+
+    Relative `build:` context paths inside a YAML-loaded spec are rewritten
+    to absolute paths anchored at the world file's directory. Backends may
+    hand the compose file to `docker compose` from an arbitrary working
+    directory (e.g. a tempfile), which would otherwise re-root any relative
+    build context and break the build; "relative to the task directory" is
+    the contract world.yml authors write against, so it's kept true here.
     """
     world = task.world
     if world is None:
         return {}
     if isinstance(world, dict):
         return world
-    with open(Path(task.dir) / world) as f:
-        return yaml.safe_load(f) or {}
+    path = Path(task.dir) / world
+    with open(path) as f:
+        doc = yaml.safe_load(f) or {}
+    _resolve_build_contexts(doc, path.parent)
+    return doc
+
+
+def _resolve_build_contexts(doc: dict, base_dir: Path) -> None:
+    """Rewrite relative `build:` context paths in `doc` in place."""
+    def resolve(p: str) -> str:
+        return str((base_dir / p).resolve())
+
+    def is_local_relative(p: str) -> bool:
+        return not (Path(p).is_absolute() or "://" in p or p.startswith("git@"))
+
+    for svc in (doc.get("services") or {}).values():
+        build = svc.get("build")
+        if isinstance(build, str) and is_local_relative(build):
+            svc["build"] = resolve(build)
+        elif isinstance(build, dict) and isinstance(build.get("context"), str):
+            if is_local_relative(build["context"]):
+                build["context"] = resolve(build["context"])
