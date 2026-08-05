@@ -1,13 +1,12 @@
+import dataclasses
 from pathlib import Path
+import pytest
 from cyberl.task import Caps, Task, task, get_task, list_tasks
 
 def test_task_is_frozen():
     t = Task(goal="g", reward=lambda s: 1.0)
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         t.goal = "x"
-        assert False, "Task should be frozen"
-    except Exception:
-        pass
 
 def test_caps_defaults():
     c = Caps()
