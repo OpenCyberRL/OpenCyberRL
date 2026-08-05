@@ -1,0 +1,28 @@
+[project]
+name = "cyberl"
+version = "0.1.0"
+description = "Plug-and-play cybersecurity RL task-building framework"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+gym = ["gymnasium>=0.29"]
+
+[project.scripts]
+cyberl = "cyberl.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cyberl"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not docker'"
+markers = ["docker: integration tests that require Docker (deselected by default)"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
