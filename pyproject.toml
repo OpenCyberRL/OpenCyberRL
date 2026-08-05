@@ -21,7 +21,7 @@ build-backend = "hatchling.build"
 packages = ["cyberl"]
 
 [tool.pytest.ini_options]
-addopts = "-m 'not docker'"
+addopts = "-m 'not docker' --import-mode=importlib"
 markers = ["docker: integration tests that require Docker (deselected by default)"]
 
 [dependency-groups]
