@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 import pytest
 from cyberl import rollout, get_task
@@ -21,3 +22,25 @@ def test_reference_solution_scores_one():
     ])
     r = rollout(get_task("lateral"), model)
     assert r.reward == 1.0
+
+def test_internal_isolated_from_attacker():
+    from cyberl.backend import resolve_backend
+    from cyberl.task import load_world
+    discover(Path(__file__).resolve().parent.parent)
+    task = get_task("lateral")
+    backend = resolve_backend(task.backend)
+    world = backend.up(load_world(task), task.caps)
+    try:
+        direct = world.exec(
+            "curl -s -m 3 http://internal:9000 || echo BLOCKED", host="attacker")
+        assert "CTF{lateral_pivot}" not in direct   # not reachable directly
+        pivot = ""
+        for _ in range(10):   # tolerate web's brief post-`up` startup window
+            pivot = world.exec(
+                "curl -s http://web:8000/fetch?host=internal:9000", host="attacker")
+            if "CTF{lateral_pivot}" in pivot:
+                break
+            time.sleep(0.5)
+        assert "CTF{lateral_pivot}" in pivot         # reachable only via the pivot
+    finally:
+        backend.down(world)

@@ -53,14 +53,20 @@ class Docker:
         services = doc.setdefault("services", {})
         if not agent:
             agent = next(iter(services), "")
-        # Inject an internal network so hosts reach each other but not the internet.
-        doc["networks"] = {_NET: {"internal": not caps.needs_internet}}
-        for name, svc in services.items():
-            svc.setdefault("networks", [_NET])
+
+        internal = not caps.needs_internet
+        networks = doc.get("networks") or {}       # topology declared by the task, if any
+        for svc in services.values():
+            svc.setdefault("networks", [_NET])     # unassigned services join the default net
             if self.cpus is not None:
                 svc["cpus"] = self.cpus
             if self.memory is not None:
                 svc["mem_limit"] = self.memory
+        if any(_NET in (svc.get("networks") or []) for svc in services.values()):
+            networks.setdefault(_NET, {})          # create the default net only if used
+        # Enforce the egress policy on every network (declared or default).
+        doc["networks"] = {name: {**(cfg or {}), "internal": internal}
+                           for name, cfg in networks.items()}
         return doc, agent
 
     def up(self, spec: dict, caps: Caps) -> DockerWorld:
