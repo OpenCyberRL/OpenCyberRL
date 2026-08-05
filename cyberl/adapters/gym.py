@@ -22,6 +22,8 @@ def to_gym(task: Task, backend=None):
 
         def reset(self, *, seed=None, options=None):
             super().reset(seed=seed)
+            if self._world is not None:      # tear down a prior episode's world
+                self._backend.down(self._world)
             self._world = self._backend.up(self._task.world, self._task.caps)
             self._episode = Episode(self._task, self._world)
             self._steps = 0
