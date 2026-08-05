@@ -1,0 +1,21 @@
+# tests/test_models.py
+import pytest
+from cyberl.models import ScriptedModel
+
+def test_scripted_model_returns_steps_in_order():
+    m = ScriptedModel([
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "1", "type": "function",
+                         "function": {"name": "shell", "arguments": '{"command": "id"}'}}]},
+        {"role": "assistant", "content": "done", "tool_calls": None},
+    ])
+    first = m([], [])
+    assert first["tool_calls"][0]["function"]["name"] == "shell"
+    second = m([], [])
+    assert second["content"] == "done"
+
+def test_scripted_model_raises_when_exhausted():
+    m = ScriptedModel([{"role": "assistant", "content": "x", "tool_calls": None}])
+    m([], [])
+    with pytest.raises(IndexError):
+        m([], [])
