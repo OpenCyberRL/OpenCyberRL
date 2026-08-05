@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import yaml
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, TYPE_CHECKING
@@ -72,3 +73,18 @@ def discover(path="tasks") -> None:
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+
+
+def load_world(task: "Task") -> dict:
+    """Resolve a Task's world spec to a dict.
+
+    A dict is returned unchanged; a string is read as YAML relative to the
+    task's source directory (Task.dir); None becomes an empty spec.
+    """
+    world = task.world
+    if world is None:
+        return {}
+    if isinstance(world, dict):
+        return world
+    with open(Path(task.dir) / world) as f:
+        return yaml.safe_load(f) or {}

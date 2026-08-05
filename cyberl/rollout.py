@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 
 from cyberl.backend import resolve_backend
 from cyberl.state import State
-from cyberl.task import Caps, Task
+from cyberl.task import Caps, Task, load_world
 
 
 @dataclass
@@ -64,7 +64,7 @@ class Episode:
 
 def rollout(task: Task, model, backend=None) -> Rollout:
     backend = resolve_backend(backend or task.backend)
-    world = backend.up(task.world, task.caps)
+    world = backend.up(load_world(task), task.caps)
     try:
         episode = Episode(task, world)
         messages = episode.start()
