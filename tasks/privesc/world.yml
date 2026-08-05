@@ -1,0 +1,5 @@
+x-cyberl:
+  agent: box
+services:
+  box:
+    build: build
