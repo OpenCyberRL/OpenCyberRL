@@ -21,3 +21,28 @@ class ScriptedModel:
         step = self._steps[self._i]   # IndexError when exhausted (intended)
         self._i += 1
         return step
+
+
+class OpenAIModel:
+    """Wraps the OpenAI-compatible chat API. Requires the `openai` extra."""
+
+    def __init__(self, model: str, base_url: str | None = None,
+                 api_key: str | None = None):
+        from openai import OpenAI
+        self.model = model
+        self.client = OpenAI(base_url=base_url, api_key=api_key)
+
+    def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
+        resp = self.client.chat.completions.create(
+            model=self.model, messages=messages, tools=tools or None)
+        msg = resp.choices[0].message
+        return {
+            "role": "assistant",
+            "content": msg.content,
+            "tool_calls": [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name,
+                              "arguments": tc.function.arguments}}
+                for tc in (msg.tool_calls or [])
+            ] or None,
+        }
