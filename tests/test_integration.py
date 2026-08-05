@@ -39,4 +39,8 @@ def test_eval_writes_jsonl_end_to_end(tmp_path):
                                    "tool_calls": None},
                      n=2, out=str(out))
     assert stats["mean_reward"] == 1.0
-    assert len(out.read_text().strip().splitlines()) == 2
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 2
+    first = json.loads(lines[0])          # the on-disk record itself is correct
+    assert first["reward"] == 1.0
+    assert first["caps"] == {"offensive": False, "needs_internet": False}
