@@ -94,15 +94,21 @@ downstream scoring pipelines or RL training.
 
 ## Safety
 
-Worlds are sandboxed by default: every Docker network a task uses is brought
-up with `internal: true`, so containers get no external egress unless the
-task sets `caps=Caps(needs_internet=True)`. Every image is built from source
-under the task's `build/` directory rather than pulled from a registry.
+What the framework enforces: worlds are sandboxed by default — every Docker
+network a task uses is brought up with `internal: true`, so containers get
+no external egress unless the task sets `caps=Caps(needs_internet=True)`.
 `caps` (`offensive`, `needs_internet`) travels with every rollout, so
 downstream consumers can filter or audit what ran. Tasks can also declare
 their own `networks:` in `world.yml` to segment hosts from each other — the
 `lateral` reference task puts its attacker on one subnet and its internal
 target on another, reachable only through a web host that bridges both.
+
+What it doesn't enforce: a task's `world.yml` can use `image:` or `build:`
+freely — the framework runs whatever the world spec declares (the quickstart
+above pulls a stock `alpine` image). The three bundled reference tasks build
+their vulnerable targets from source under `build/` by convention, so no
+prebuilt exploit images get pulled, but that's a choice those tasks make,
+not something `cyberl` checks.
 
 ## Reference tasks
 
