@@ -1,0 +1,9 @@
+x-cyberl:
+  agent: attacker
+services:
+  attacker:
+    build: build/attacker
+  web:
+    build: build/web
+  internal:
+    build: build/internal
