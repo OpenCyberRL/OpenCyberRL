@@ -72,6 +72,14 @@ class Docker:
         cp = _run(["docker", "compose", "-p", project, "-f", path,
                    "up", "-d", "--build"])
         if cp.returncode != 0:
+            # Best-effort cleanup of anything that started before the failure,
+            # so a failed up() never leaks containers/networks or the temp file.
+            _run(["docker", "compose", "-p", project, "-f", path,
+                  "down", "-v", "--remove-orphans"])
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
             raise RuntimeError(f"docker compose up failed:\n{cp.stderr}")
         return DockerWorld(project, path, agent)
 
