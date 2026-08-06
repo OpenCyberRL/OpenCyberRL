@@ -30,3 +30,15 @@ def test_docker_no_egress_by_default():
         assert "BLOCKED" in out
     finally:
         backend.down(world)
+
+def test_docker_exec_bounded_by_timeout():
+    # A hanging command (e.g. `sleep infinity`) must not hang the rollout or
+    # teardown: exec() bounds it at exec_timeout and returns a sentinel
+    # instead of raising or blocking forever.
+    backend = Docker(exec_timeout=1.0)
+    world = backend.up(SPEC, Caps())
+    try:
+        out = world.exec("sleep 5")
+        assert out == "[cyberl: command timed out after 1.0s]"
+    finally:
+        backend.down(world)

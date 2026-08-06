@@ -56,6 +56,20 @@ def test_load_world_injects_basedir_for_file_backed_world(tmp_path):
     doc = load_world(t)
     assert doc["x-cyberl"]["basedir"] == str(tmp_path.resolve())
 
+def test_load_world_basedir_anchored_at_nested_world_file_dir(tmp_path):
+    # A nested world="sub/world.yml": build contexts and basedir must both
+    # resolve relative to sub/, not task.dir (tmp_path) — they need to agree
+    # so env_file/bind-mounts and build: share a base.
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "world.yml").write_text(
+        "services:\n  web:\n    build: build/web\n"
+    )
+    t = Task(goal="g", reward=lambda s: 1.0, world="sub/world.yml", dir=str(tmp_path))
+    doc = load_world(t)
+    assert doc["x-cyberl"]["basedir"] == str(sub.resolve())
+    assert doc["services"]["web"]["build"] == str((sub / "build/web").resolve())
+
 def test_load_world_dict_world_has_no_basedir():
     t = Task(goal="g", reward=lambda s: 1.0, world={"services": {"box": {}}})
     doc = load_world(t)

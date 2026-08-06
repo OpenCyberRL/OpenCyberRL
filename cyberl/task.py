@@ -92,11 +92,15 @@ def load_world(task: "Task") -> dict:
         return {}
     if isinstance(world, dict):
         return world
-    path = Path(task.dir) / world
-    with open(path) as f:
+    world_path = Path(task.dir) / world
+    with open(world_path) as f:
         doc = yaml.safe_load(f) or {}
-    _resolve_build_contexts(doc, path.parent)
-    doc.setdefault("x-cyberl", {})["basedir"] = str(Path(task.dir).resolve())
+    _resolve_build_contexts(doc, world_path.parent)
+    # basedir anchors env_file/bind-mount paths for the backend; it must be
+    # the world file's own directory so it agrees with the build-context
+    # base above (a nested world="sub/world.yml" would otherwise resolve
+    # build: contexts from sub/ but env_file/mounts from task.dir).
+    doc.setdefault("x-cyberl", {})["basedir"] = str(world_path.parent.resolve())
     return doc
 
 

@@ -12,6 +12,24 @@ from cyberl.task import Task, load_world
 def to_gym(task: Task, backend=None):
     import gymnasium as gym
 
+    class _MessageSpace(gym.spaces.Space):
+        """Permissive space for OpenAI-style message dicts (or, if sequence=True,
+        a transcript list of them). LLM tool-call messages don't fit numeric Gym
+        spaces, so this validates shape without pretending to be a Box/Text."""
+        def __init__(self, sequence=False):
+            super().__init__(shape=None, dtype=None)
+            self._sequence = sequence
+
+        def contains(self, x):
+            if self._sequence:
+                return isinstance(x, list) and all(isinstance(m, dict) for m in x)
+            return isinstance(x, dict)
+
+        def sample(self, mask=None):
+            if self._sequence:
+                return []
+            return {"role": "assistant", "content": "", "tool_calls": None}
+
     class CyberlEnv(gym.Env):
         def __init__(self):
             self._task = task
@@ -22,8 +40,8 @@ def to_gym(task: Task, backend=None):
             # Actions are OpenAI-style assistant-message dicts and observations are
             # message transcripts — neither fits a standard numeric Gym space, so these
             # are permissive placeholders provided so the env satisfies the Gym API.
-            self.action_space = gym.spaces.Text(max_length=1_000_000)
-            self.observation_space = gym.spaces.Sequence(gym.spaces.Text(max_length=1_000_000))
+            self.action_space = _MessageSpace()
+            self.observation_space = _MessageSpace(sequence=True)
 
         def reset(self, *, seed=None, options=None):
             super().reset(seed=seed)
@@ -32,7 +50,10 @@ def to_gym(task: Task, backend=None):
             self._world = self._backend.up(load_world(self._task), self._task.caps)
             self._episode = Episode(self._task, self._world)
             self._steps = 0
-            return self._episode.start(), {}
+            self._episode.start()
+            # A copy: the caller may retain this observation while step() goes
+            # on to mutate self._episode.transcript in place.
+            return list(self._episode.transcript), {}
 
         def step(self, action):
             self._steps += 1
@@ -43,11 +64,11 @@ def to_gym(task: Task, backend=None):
                 if self._steps >= self._task.max_steps:
                     # match rollout(): score the verifier at the step budget
                     reward = float(self._task.reward(self._episode.state("")))
-                    return self._episode.transcript, reward, False, True, {}
-                return self._episode.transcript, 0.0, False, False, {}
+                    return list(self._episode.transcript), reward, False, True, {}
+                return list(self._episode.transcript), 0.0, False, False, {}
             answer = action.get("content") or ""
             reward = float(self._task.reward(self._episode.state(answer)))
-            return self._episode.transcript, reward, True, False, {}
+            return list(self._episode.transcript), reward, True, False, {}
 
         def close(self):
             if self._world is not None:
