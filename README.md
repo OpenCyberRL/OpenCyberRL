@@ -1,4 +1,4 @@
-<p align="center"><img src="logo.png" alt="OpenCyberRL" width="360"></p>
+<p align="center"><img src="logo.png" alt="OpenCyberRL" width="630"></p>
 
 # OpenCyberRL
 
