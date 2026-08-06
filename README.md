@@ -110,6 +110,13 @@ their vulnerable targets from source under `build/` by convention, so no
 prebuilt exploit images get pulled, but that's a choice those tasks make,
 not something `cyberl` checks.
 
+Trust boundary: the sandbox is built for an untrusted *agent* — it only ever
+runs inside a container on the internal network described above, with no
+egress by default. The task *author* is trusted: the isolation guarantee
+assumes `world.yml` doesn't set `network_mode: host`, `privileged: true`, or
+mount the Docker socket (`/var/run/docker.sock`) into a service — `cyberl`
+doesn't currently inspect a world spec for any of those.
+
 ## Reference tasks
 
 `tasks/web_sqli`, `tasks/privesc`, and `tasks/lateral` are complete,

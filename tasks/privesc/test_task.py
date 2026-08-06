@@ -19,3 +19,6 @@ def test_reference_solution_scores_one():
     ])
     r = rollout(get_task("privesc"), model)
     assert r.reward == 1.0
+    tool_output = " ".join(
+        m.get("content") or "" for m in r.transcript if m.get("role") == "tool")
+    assert "CTF{root_via_suid}" in tool_output   # the exploit itself returned the flag, not just the scripted answer

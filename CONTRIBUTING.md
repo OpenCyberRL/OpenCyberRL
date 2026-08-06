@@ -53,7 +53,6 @@ by name.
 | `tools` | `tuple` | The `Tool` objects the agent may call — usually `[shell]`. |
 | `caps` | `Caps` | Capability metadata: `offensive` (bool) and `needs_internet` (bool). Drives network policy and rides along in every `Rollout`. |
 | `max_steps` | `int` | Max agent turns before the episode ends unanswered. Defaults to 30; the reference tasks use 8. |
-| `agent` | `str` | Reserved. The docker backend does not currently read this — which service `world.exec()`/`world.read_file()` target by default comes from `world.yml`'s `x-cyberl.agent` key instead. Leave it unset. |
 | `name` | `str` | Filled in automatically by `@task` (the function name, or an explicit `name=` passed to the decorator). Don't set it yourself. |
 | `dir` | `str` | Filled in automatically by `@task`: the directory of the file that defined the task, used to resolve a string `world:` path. Don't set it yourself. |
 

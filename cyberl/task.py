@@ -31,7 +31,6 @@ class Task:
     tools: tuple = ()
     caps: Caps = field(default_factory=Caps)
     max_steps: int = 30
-    agent: str = ""          # which service the agent's shell runs on ("" = sole/first)
     name: str = ""           # filled by @task
     dir: str = ""            # filled by @task (dir of the defining file)
 
