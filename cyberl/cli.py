@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import keyword
 import os
+import sys
 from pathlib import Path
 
 from cyberl.task import discover, get_task, list_tasks
@@ -11,8 +13,15 @@ _TEMPLATE = Path(__file__).parent / "_template"
 
 
 def _cmd_new(args) -> int:
+    if not args.name.isidentifier() or keyword.iskeyword(args.name):
+        print(f"cyberl: error: {args.name!r} is not a valid task name "
+              f"(must be a Python identifier, not a keyword)", file=sys.stderr)
+        return 1
     dest = Path("tasks") / args.name
-    dest.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        print(f"cyberl: error: {dest} already exists — refusing to overwrite", file=sys.stderr)
+        return 1
+    dest.mkdir(parents=True)          # no exist_ok
     (dest / "task.py").write_text(
         (_TEMPLATE / "task.py").read_text().replace("NAME", args.name))
     (dest / "world.yml").write_text((_TEMPLATE / "world.yml").read_text())

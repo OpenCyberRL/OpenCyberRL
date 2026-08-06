@@ -38,3 +38,12 @@ def test_render_mixed_declared_and_default():
     assert "cyberl_net" in doc["networks"]
     assert doc["services"]["b"]["networks"] == ["cyberl_net"]
     assert doc["services"]["a"]["networks"] == ["edge"]
+
+def test_render_locks_down_undeclared_network():
+    # A service names a network ("default") that is absent from the top-level
+    # `networks:` block. Compose would otherwise create it as an externally
+    # routable network regardless of Caps(needs_internet=False) — the implicit
+    # egress hole Fix A closes.
+    spec = {"services": {"box": {"image": "x", "networks": ["default"]}}}
+    doc, _ = _render(spec)
+    assert doc["networks"]["default"] == {"internal": True}

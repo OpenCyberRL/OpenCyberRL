@@ -96,6 +96,7 @@ def load_world(task: "Task") -> dict:
     with open(path) as f:
         doc = yaml.safe_load(f) or {}
     _resolve_build_contexts(doc, path.parent)
+    doc.setdefault("x-cyberl", {})["basedir"] = str(Path(task.dir).resolve())
     return doc
 
 
