@@ -1,7 +1,7 @@
 import dataclasses
 from pathlib import Path
 import pytest
-from cyberl.task import Caps, Task, task, get_task, list_tasks, discover
+from opencrl.task import Caps, Task, task, get_task, list_tasks, discover
 
 def test_task_is_frozen():
     t = Task(goal="g", reward=lambda s: 1.0)
@@ -39,7 +39,7 @@ def test_discover_registers_module_using_future_annotations_dataclass(tmp_path):
     (task_dir / "task.py").write_text(
         "from __future__ import annotations\n"
         "from dataclasses import dataclass\n"
-        "from cyberl.task import Task, task\n"
+        "from opencrl.task import Task, task\n"
         "\n"
         "@dataclass\n"
         "class Config:\n"

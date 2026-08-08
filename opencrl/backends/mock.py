@@ -1,8 +1,8 @@
 """In-memory backend for fast, Docker-free tests."""
 from __future__ import annotations
 
-from cyberl.backend import register_backend
-from cyberl.task import Caps
+from opencrl.backend import register_backend
+from opencrl.task import Caps
 
 
 class MockWorld:

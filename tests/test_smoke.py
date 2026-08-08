@@ -1,2 +1,2 @@
-def test_import_cyberl():
-    import cyberl  # noqa: F401
+def test_import_opencrl():
+    import opencrl  # noqa: F401

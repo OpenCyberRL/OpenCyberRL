@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cyberl.backend import Backend
-    from cyberl.state import State
-    from cyberl.tools import Tool
+    from opencrl.backend import Backend
+    from opencrl.state import State
+    from opencrl.tools import Tool
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ def discover(path="tasks") -> None:
     root = Path(path)
     for task_py in sorted(root.glob("*/task.py")):
         spec = importlib.util.spec_from_file_location(
-            f"cyberl_tasks.{task_py.parent.name}", task_py
+            f"opencrl_tasks.{task_py.parent.name}", task_py
         )
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
@@ -106,7 +106,7 @@ def load_world(task: "Task") -> dict:
     # the world file's own directory so it agrees with the build-context
     # base above (a nested world="sub/world.yml" would otherwise resolve
     # build: contexts from sub/ but env_file/mounts from task.dir).
-    doc.setdefault("x-cyberl", {})["basedir"] = str(world_path.parent.resolve())
+    doc.setdefault("x-opencrl", {})["basedir"] = str(world_path.parent.resolve())
     return doc
 
 

@@ -1,7 +1,7 @@
 import pytest
-from cyberl.task import Caps
-from cyberl.backend import register_backend, resolve_backend
-from cyberl.backends.mock import MockBackend, MockWorld
+from opencrl.task import Caps
+from opencrl.backend import register_backend, resolve_backend
+from opencrl.backends.mock import MockBackend, MockWorld
 
 def test_mock_world_exec_and_files():
     w = MockWorld(exec_map={"id": "uid=0(root)"}, files={"/f": "hi"})

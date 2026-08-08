@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from cyberl.state import State
+from opencrl.state import State
 
 
 def flag(expected: str) -> Callable[[State], float]:

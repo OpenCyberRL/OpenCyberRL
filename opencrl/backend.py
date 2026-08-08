@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
-from cyberl.task import Caps
-from cyberl.world import World
+from opencrl.task import Caps
+from opencrl.world import World
 
 
 class Backend(Protocol):

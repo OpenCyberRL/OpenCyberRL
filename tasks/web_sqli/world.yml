@@ -1,4 +1,4 @@
-x-cyberl:
+x-opencrl:
   agent: attacker
 services:
   attacker:

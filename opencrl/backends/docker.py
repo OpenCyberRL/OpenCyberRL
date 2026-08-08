@@ -11,8 +11,8 @@ import uuid
 
 import yaml
 
-from cyberl.backend import register_backend
-from cyberl.task import Caps
+from opencrl.backend import register_backend
+from opencrl.task import Caps
 
 # Compose's own `default` network: services that declare no `networks:` are
 # implicitly placed on it, so reusing that name (rather than a custom one)
@@ -51,10 +51,10 @@ class DockerWorld:
             cp = self._compose("exec", "-T", svc, "sh", "-lc", command,
                                timeout=self.exec_timeout)
         except subprocess.TimeoutExpired:
-            return f"[cyberl: command timed out after {self.exec_timeout}s]"
+            return f"[opencrl: command timed out after {self.exec_timeout}s]"
         out = (cp.stdout or "") + (cp.stderr or "")
         if len(out) > _MAX_OUTPUT:
-            out = out[:_MAX_OUTPUT] + "\n[cyberl: output truncated]"
+            out = out[:_MAX_OUTPUT] + "\n[opencrl: output truncated]"
         return out
 
     def read_file(self, path: str, host: str | None = None) -> str | None:
@@ -68,7 +68,7 @@ class DockerWorld:
             return None
         content = cp.stdout
         if len(content) > _MAX_OUTPUT:
-            content = content[:_MAX_OUTPUT] + "\n[cyberl: output truncated]"
+            content = content[:_MAX_OUTPUT] + "\n[opencrl: output truncated]"
         return content
 
 
@@ -86,9 +86,9 @@ class Docker:
             # runs, so an included service could sit on a non-internal
             # `default` net regardless of Caps(needs_internet=False).
             raise ValueError(
-                "cyberl: top-level Compose 'include' is not supported "
+                "opencrl: top-level Compose 'include' is not supported "
                 "(it bypasses network isolation)")
-        agent = (doc.pop("x-cyberl", {}) or {}).get("agent", "")
+        agent = (doc.pop("x-opencrl", {}) or {}).get("agent", "")
         services = doc.setdefault("services", {})
         if not agent:
             agent = next(iter(services), "")
@@ -103,7 +103,7 @@ class Docker:
             for name, cfg in declared.items():
                 if (cfg or {}).get("external"):
                     raise ValueError(
-                        f"cyberl: external network {name!r} is not allowed "
+                        f"opencrl: external network {name!r} is not allowed "
                         f"when needs_internet=False")
         for svc in services.values():
             if not svc.get("networks"):        # None, missing, [], or {} -> default internal net
@@ -122,11 +122,11 @@ class Docker:
 
     def up(self, spec: dict, caps: Caps) -> DockerWorld:
         spec = spec or {}
-        # Read before _render pops `x-cyberl` off the spec.
-        basedir = (spec.get("x-cyberl") or {}).get("basedir", "")
+        # Read before _render pops `x-opencrl` off the spec.
+        basedir = (spec.get("x-opencrl") or {}).get("basedir", "")
         doc, agent = self._render(spec, caps)
-        project = f"cyberl-{uuid.uuid4().hex[:8]}"
-        fd, path = tempfile.mkstemp(prefix="cyberl-", suffix=".yml")
+        project = f"opencrl-{uuid.uuid4().hex[:8]}"
+        fd, path = tempfile.mkstemp(prefix="opencrl-", suffix=".yml")
         with os.fdopen(fd, "w") as f:
             yaml.safe_dump(doc, f)
         base = ["docker", "compose", "-p", project, "-f", path]
@@ -152,7 +152,7 @@ class Docker:
         # No timeout: teardown should be allowed to run to completion.
         cp = world._compose("down", "-v", "--remove-orphans", timeout=None)
         if cp.returncode != 0:
-            print(f"cyberl: warning: teardown failed for project {world.project}; "
+            print(f"opencrl: warning: teardown failed for project {world.project}; "
                   f"containers/networks may remain. Compose file retained at "
                   f"{world.compose_file}.\n{cp.stderr}", file=sys.stderr)
             return

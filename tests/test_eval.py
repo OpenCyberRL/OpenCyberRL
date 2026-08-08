@@ -1,9 +1,9 @@
 import json
-from cyberl.task import Task, Caps
-from cyberl.tools import shell
-from cyberl.reward import flag
-from cyberl.backends.mock import MockBackend
-from cyberl.adapters.eval import evaluate
+from opencrl.task import Task, Caps
+from opencrl.tools import shell
+from opencrl.reward import flag
+from opencrl.backends.mock import MockBackend
+from opencrl.adapters.eval import evaluate
 
 def make_task():
     return Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), name="demo",

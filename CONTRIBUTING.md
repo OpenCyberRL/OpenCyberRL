@@ -3,14 +3,14 @@
 ## Write your first task
 
 ```bash
-uv run cyberl new mytask
+uv run opencrl new mytask
 ```
 
 This scaffolds `tasks/mytask/task.py` and `tasks/mytask/world.yml`:
 
 ```python
 # tasks/mytask/task.py
-from cyberl import task, Task, shell, flag, Caps
+from opencrl import task, Task, shell, flag, Caps
 
 
 @task
@@ -27,7 +27,7 @@ def mytask() -> Task:
 
 ```yaml
 # tasks/mytask/world.yml
-x-cyberl:
+x-opencrl:
   agent: box
 services:
   box:
@@ -42,7 +42,7 @@ by name.
 
 ## The `Task` fields
 
-`Task` (`cyberl/task.py`) is frozen — set every field at construction time:
+`Task` (`opencrl/task.py`) is frozen — set every field at construction time:
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -61,7 +61,7 @@ by name.
 `world.yml` is a Docker Compose file with one extra top-level key:
 
 ```yaml
-x-cyberl:
+x-opencrl:
   agent: attacker      # the service world.exec()/read_file() target by default
 services:
   attacker:
@@ -78,7 +78,7 @@ To segment hosts from each other, declare `networks:` and list each
 service's memberships explicitly:
 
 ```yaml
-x-cyberl:
+x-opencrl:
   agent: attacker
 networks:
   edge:
@@ -109,9 +109,9 @@ plays out a known-good solution and must score reward `1.0`:
 import json
 from pathlib import Path
 import pytest
-from cyberl import rollout, get_task
-from cyberl.task import discover
-from cyberl.models import ScriptedModel
+from opencrl import rollout, get_task
+from opencrl.task import discover
+from opencrl.models import ScriptedModel
 
 pytestmark = pytest.mark.docker
 

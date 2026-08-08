@@ -27,8 +27,8 @@ A task is a goal, a set of tools, a reward function, and a world. This one
 inlines the world as a plain dict, so it needs no separate files:
 
 ```python
-import cyberl
-from cyberl import task, Task, shell, flag, Caps, rollout
+import opencrl
+from opencrl import task, Task, shell, flag, Caps, rollout
 
 @task
 def hello() -> Task:
@@ -38,7 +38,7 @@ def hello() -> Task:
         reward=flag("CTF{hi}"),
         backend="docker",
         world={
-            "x-cyberl": {"agent": "box"},
+            "x-opencrl": {"agent": "box"},
             "services": {
                 "box": {
                     "image": "alpine:3.20",
@@ -49,7 +49,7 @@ def hello() -> Task:
         caps=Caps(),
     )
 
-r = rollout(hello(), cyberl.OpenAIModel("gpt-4o-mini"))
+r = rollout(hello(), opencrl.OpenAIModel("gpt-4o-mini"))
 print(r.reward, r.transcript[-1])
 ```
 
@@ -63,10 +63,10 @@ down — win or lose.
 ## CLI
 
 ```bash
-cyberl new <name>                          # scaffold tasks/<name>/{task.py,world.yml}
-cyberl list                                 # list discovered tasks and their caps
-cyberl run <name> --model gpt-4o-mini       # run one rollout, print the transcript + reward
-cyberl eval <name> -n 16 --out rollouts.jsonl   # run N rollouts, write Rollout JSONL, report mean reward
+opencrl new <name>                          # scaffold tasks/<name>/{task.py,world.yml}
+opencrl list                                 # list discovered tasks and their caps
+opencrl run <name> --model gpt-4o-mini       # run one rollout, print the transcript + reward
+opencrl eval <name> -n 16 --out rollouts.jsonl   # run N rollouts, write Rollout JSONL, report mean reward
 ```
 
 ## The `Rollout` artifact
@@ -89,7 +89,7 @@ same JSON-serializable shape (`Rollout.to_dict()`):
 }
 ```
 
-`cyberl eval` writes one of these per line to a JSONL file, ready for
+`opencrl eval` writes one of these per line to a JSONL file, ready for
 downstream scoring pipelines or RL training.
 
 ## Safety
@@ -108,13 +108,13 @@ freely — the framework runs whatever the world spec declares (the quickstart
 above pulls a stock `alpine` image). The three bundled reference tasks build
 their vulnerable targets from source under `build/` by convention, so no
 prebuilt exploit images get pulled, but that's a choice those tasks make,
-not something `cyberl` checks.
+not something `opencrl` checks.
 
 Trust boundary: the sandbox is built for an untrusted *agent* — it only ever
 runs inside a container on the internal network described above, with no
 egress by default. The task *author* is trusted: the isolation guarantee
 assumes `world.yml` doesn't set `network_mode: host`, `privileged: true`, or
-mount the Docker socket (`/var/run/docker.sock`) into a service — `cyberl`
+mount the Docker socket (`/var/run/docker.sock`) into a service — `opencrl`
 doesn't currently inspect a world spec for any of those.
 
 ## Reference tasks

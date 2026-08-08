@@ -2,9 +2,9 @@ import json
 import time
 from pathlib import Path
 import pytest
-from cyberl import rollout, get_task
-from cyberl.task import discover
-from cyberl.models import ScriptedModel
+from opencrl import rollout, get_task
+from opencrl.task import discover
+from opencrl.models import ScriptedModel
 
 pytestmark = pytest.mark.docker
 
@@ -24,8 +24,8 @@ def test_reference_solution_scores_one():
     assert r.reward == 1.0
 
 def test_internal_isolated_from_attacker():
-    from cyberl.backend import resolve_backend
-    from cyberl.task import load_world
+    from opencrl.backend import resolve_backend
+    from opencrl.task import load_world
     discover(Path(__file__).resolve().parent.parent)
     task = get_task("lateral")
     backend = resolve_backend(task.backend)

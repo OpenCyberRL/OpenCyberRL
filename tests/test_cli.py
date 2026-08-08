@@ -1,5 +1,5 @@
 from pathlib import Path
-from cyberl.cli import main
+from opencrl.cli import main
 
 def test_new_scaffolds_task(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)

@@ -2,11 +2,11 @@ import json
 import pytest
 gym = pytest.importorskip("gymnasium")
 
-from cyberl.task import Task, Caps
-from cyberl.tools import shell
-from cyberl.reward import flag, file_exists
-from cyberl.backends.mock import MockBackend
-from cyberl.adapters.gym import to_gym
+from opencrl.task import Task, Caps
+from opencrl.tools import shell
+from opencrl.reward import flag, file_exists
+from opencrl.backends.mock import MockBackend
+from opencrl.adapters.gym import to_gym
 
 def test_gym_env_has_valid_spaces():
     task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), max_steps=5)

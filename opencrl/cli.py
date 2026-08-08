@@ -1,4 +1,4 @@
-"""cyberl CLI: new | list | run | eval. A thin wrapper over the library."""
+"""opencrl CLI: new | list | run | eval. A thin wrapper over the library."""
 from __future__ import annotations
 
 import argparse
@@ -7,19 +7,19 @@ import os
 import sys
 from pathlib import Path
 
-from cyberl.task import discover, get_task, list_tasks
+from opencrl.task import discover, get_task, list_tasks
 
 _TEMPLATE = Path(__file__).parent / "_template"
 
 
 def _cmd_new(args) -> int:
     if not args.name.isidentifier() or keyword.iskeyword(args.name):
-        print(f"cyberl: error: {args.name!r} is not a valid task name "
+        print(f"opencrl: error: {args.name!r} is not a valid task name "
               f"(must be a Python identifier, not a keyword)", file=sys.stderr)
         return 1
     dest = Path("tasks") / args.name
     if dest.exists():
-        print(f"cyberl: error: {dest} already exists — refusing to overwrite", file=sys.stderr)
+        print(f"opencrl: error: {dest} already exists — refusing to overwrite", file=sys.stderr)
         return 1
     dest.mkdir(parents=True)          # no exist_ok
     (dest / "task.py").write_text(
@@ -38,13 +38,13 @@ def _cmd_list(args) -> int:
 
 
 def _build_model(args):
-    from cyberl.models import OpenAIModel
+    from opencrl.models import OpenAIModel
     return OpenAIModel(model=args.model, base_url=args.base_url,
                        api_key=os.environ.get("OPENAI_API_KEY"))
 
 
 def _cmd_run(args) -> int:
-    from cyberl.rollout import rollout
+    from opencrl.rollout import rollout
     discover(args.path)
     r = rollout(get_task(args.name), _build_model(args))
     for m in r.transcript:
@@ -54,7 +54,7 @@ def _cmd_run(args) -> int:
 
 
 def _cmd_eval(args) -> int:
-    from cyberl.adapters.eval import evaluate
+    from opencrl.adapters.eval import evaluate
     discover(args.path)
     stats = evaluate(get_task(args.name), _build_model(args),
                      n=args.n, out=args.out)
@@ -63,7 +63,7 @@ def _cmd_eval(args) -> int:
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="cyberl")
+    p = argparse.ArgumentParser(prog="opencrl")
     p.add_argument("--path", default="tasks", help="tasks directory")
     sub = p.add_subparsers(dest="cmd", required=True)
 

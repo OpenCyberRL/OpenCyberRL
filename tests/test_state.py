@@ -1,4 +1,4 @@
-from cyberl.state import State
+from opencrl.state import State
 
 class FakeWorld:
     agent = "agent"

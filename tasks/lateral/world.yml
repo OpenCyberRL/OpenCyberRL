@@ -1,5 +1,5 @@
 # tasks/lateral/world.yml
-x-cyberl:
+x-opencrl:
   agent: attacker
 networks:
   edge:

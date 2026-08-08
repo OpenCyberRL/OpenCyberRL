@@ -1,5 +1,5 @@
-from cyberl.reward import flag, contains, file_exists
-from cyberl.state import State
+from opencrl.reward import flag, contains, file_exists
+from opencrl.state import State
 
 class FakeWorld:
     agent = "agent"

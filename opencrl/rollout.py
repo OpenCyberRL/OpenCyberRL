@@ -4,9 +4,9 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-from cyberl.backend import resolve_backend
-from cyberl.state import State
-from cyberl.task import Caps, Task, load_world
+from opencrl.backend import resolve_backend
+from opencrl.state import State
+from opencrl.task import Caps, Task, load_world
 
 
 @dataclass

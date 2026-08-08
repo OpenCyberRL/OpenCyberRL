@@ -1,7 +1,7 @@
 import json
 import pytest
-from cyberl import Task, shell, flag, Caps, rollout, evaluate
-from cyberl.models import ScriptedModel
+from opencrl import Task, shell, flag, Caps, rollout, evaluate
+from opencrl.models import ScriptedModel
 
 pytestmark = pytest.mark.docker
 
@@ -12,7 +12,7 @@ def _hello_task():
         tools=(shell,),
         reward=flag("CTF{e2e}"),
         backend="docker",
-        world={"x-cyberl": {"agent": "box"},
+        world={"x-opencrl": {"agent": "box"},
                "services": {"box": {"image": "alpine:3.20",
                                     "command": "sh -c 'echo CTF{e2e}>/flag; sleep 600'"}}},
         caps=Caps(),

@@ -1,4 +1,4 @@
-from cyberl import task, Task, shell, flag, Caps
+from opencrl import task, Task, shell, flag, Caps
 
 
 @task

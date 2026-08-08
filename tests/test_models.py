@@ -1,6 +1,6 @@
 # tests/test_models.py
 import pytest
-from cyberl.models import ScriptedModel
+from opencrl.models import ScriptedModel
 
 def test_scripted_model_returns_steps_in_order():
     m = ScriptedModel([

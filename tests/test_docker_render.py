@@ -1,19 +1,19 @@
 import pytest
-from cyberl.task import Caps
-from cyberl.backends.docker import Docker
+from opencrl.task import Caps
+from opencrl.backends.docker import Docker
 
 def _render(spec, caps=Caps()):
     return Docker()._render(spec, caps)
 
 def test_render_default_network_when_none_declared():
-    doc, agent = _render({"x-cyberl": {"agent": "box"},
+    doc, agent = _render({"x-opencrl": {"agent": "box"},
                           "services": {"box": {"image": "alpine"}}})
     assert agent == "box"
     assert doc["networks"] == {"default": {"internal": True}}
     assert doc["services"]["box"]["networks"] == ["default"]
 
 def test_render_honors_declared_networks():
-    spec = {"x-cyberl": {"agent": "a"},
+    spec = {"x-opencrl": {"agent": "a"},
             "networks": {"edge": None, "backend": None},
             "services": {
                 "a": {"image": "x", "networks": ["edge"]},

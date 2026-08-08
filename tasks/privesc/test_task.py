@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 import pytest
-from cyberl import rollout, get_task
-from cyberl.task import discover
-from cyberl.models import ScriptedModel
+from opencrl import rollout, get_task
+from opencrl.task import discover
+from opencrl.models import ScriptedModel
 
 pytestmark = pytest.mark.docker
 

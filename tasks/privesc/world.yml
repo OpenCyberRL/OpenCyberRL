@@ -1,4 +1,4 @@
-x-cyberl:
+x-opencrl:
   agent: box
 services:
   box:

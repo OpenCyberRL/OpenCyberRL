@@ -1,11 +1,11 @@
 import pytest
-from cyberl.task import Caps
-from cyberl.backends.docker import Docker
+from opencrl.task import Caps
+from opencrl.backends.docker import Docker
 
 pytestmark = pytest.mark.docker
 
 SPEC = {
-    "x-cyberl": {"agent": "box"},
+    "x-opencrl": {"agent": "box"},
     "services": {"box": {"image": "alpine:3.20", "command": "sleep 600"}},
 }
 
@@ -51,6 +51,6 @@ def test_docker_exec_bounded_by_timeout():
     world = backend.up(SPEC, Caps())
     try:
         out = world.exec("sleep 5")
-        assert out == "[cyberl: command timed out after 1.0s]"
+        assert out == "[opencrl: command timed out after 1.0s]"
     finally:
         backend.down(world)

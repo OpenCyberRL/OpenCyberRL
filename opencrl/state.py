@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cyberl.world import World
+from opencrl.world import World
 
 
 @dataclass

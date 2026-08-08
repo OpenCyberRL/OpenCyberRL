@@ -1,10 +1,10 @@
 import json
-from cyberl.task import Task, Caps
-from cyberl.tools import shell
-from cyberl.reward import flag
-from cyberl.models import ScriptedModel
-from cyberl.backends.mock import MockBackend
-from cyberl.rollout import rollout, Rollout
+from opencrl.task import Task, Caps
+from opencrl.tools import shell
+from opencrl.reward import flag
+from opencrl.models import ScriptedModel
+from opencrl.backends.mock import MockBackend
+from opencrl.rollout import rollout, Rollout
 
 def make_task():
     return Task(

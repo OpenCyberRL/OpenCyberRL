@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 
-from cyberl.rollout import rollout
-from cyberl.task import Task
+from opencrl.rollout import rollout
+from opencrl.task import Task
 
 
 def evaluate(task: Task, model, n: int = 1, out: str | None = None,

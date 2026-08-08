@@ -4,9 +4,9 @@ gymnasium is imported lazily so the core never depends on it.
 """
 from __future__ import annotations
 
-from cyberl.backend import resolve_backend
-from cyberl.rollout import Episode
-from cyberl.task import Task, load_world
+from opencrl.backend import resolve_backend
+from opencrl.rollout import Episode
+from opencrl.task import Task, load_world
 
 
 def to_gym(task: Task, backend=None):
@@ -30,7 +30,7 @@ def to_gym(task: Task, backend=None):
                 return []
             return {"role": "assistant", "content": "", "tool_calls": None}
 
-    class CyberlEnv(gym.Env):
+    class OpencrlEnv(gym.Env):
         def __init__(self):
             self._task = task
             self._backend = resolve_backend(backend or task.backend)
@@ -75,4 +75,4 @@ def to_gym(task: Task, backend=None):
                 self._backend.down(self._world)
                 self._world = None
 
-    return CyberlEnv()
+    return OpencrlEnv()
