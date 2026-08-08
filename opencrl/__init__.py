@@ -10,6 +10,7 @@ from opencrl.reward import flag, contains, file_exists
 from opencrl.backend import register_backend, resolve_backend
 from opencrl.backends.mock import MockBackend
 from opencrl.backends.docker import Docker
+from opencrl.backends.qemu import Qemu
 from opencrl.models import ScriptedModel, OpenAIModel
 from opencrl.rollout import rollout, Rollout
 from opencrl.adapters.eval import evaluate
@@ -19,7 +20,7 @@ __all__ = [
     "task", "Task", "Caps", "Tool", "shell",
     "flag", "contains", "file_exists",
     "rollout", "Rollout", "State", "evaluate", "to_gym",
-    "Docker", "MockBackend", "ScriptedModel", "OpenAIModel",
+    "Docker", "Qemu", "MockBackend", "ScriptedModel", "OpenAIModel",
     "register_backend", "resolve_backend",
     "get_task", "list_tasks", "discover",
 ]

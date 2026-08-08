@@ -4,7 +4,7 @@ def test_public_surface_imports():
         "task", "Task", "Caps", "Tool", "shell",
         "flag", "contains", "file_exists",
         "rollout", "Rollout", "State", "evaluate", "to_gym",
-        "Docker", "MockBackend", "ScriptedModel", "OpenAIModel",
+        "Docker", "Qemu", "MockBackend", "ScriptedModel", "OpenAIModel",
         "register_backend", "resolve_backend",
         "get_task", "list_tasks", "discover",
     ]:
