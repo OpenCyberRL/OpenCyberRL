@@ -113,3 +113,62 @@ def test_read_until_fails_fast_on_eof():
 
     w = QemuWorld(None, _EOFChan(), exec_timeout=5.0)
     assert w.exec("id") == "[opencrl: command timed out after 5.0s]"
+
+
+import pytest
+from opencrl.task import Caps
+from opencrl.backend import resolve_backend
+from opencrl.backends.qemu import Qemu
+
+
+def test_argv_resolves_relative_paths_against_basedir():
+    spec = {"kernel": "bzImage", "initrd": "rootfs.cpio.gz",
+            "x-opencrl": {"basedir": "/base"}}
+    argv = Qemu()._argv(spec, Caps(), "/tmp/s.sock")
+    assert "-kernel" in argv and argv[argv.index("-kernel") + 1] == "/base/bzImage"
+    assert "-initrd" in argv and argv[argv.index("-initrd") + 1] == "/base/rootfs.cpio.gz"
+    assert argv[argv.index("-serial") + 1] == "unix:/tmp/s.sock,server,nowait"
+    assert argv[argv.index("-machine") + 1] == "accel=hvf:kvm:tcg"
+    assert "console=ttyS0" in argv[argv.index("-append") + 1]
+    # no networking at all
+    assert not any(a in ("-netdev", "-net", "-nic") for a in argv)
+
+
+def test_argv_keeps_absolute_paths():
+    spec = {"kernel": "/abs/bzImage", "initrd": "/abs/rootfs.cpio.gz"}
+    argv = Qemu()._argv(spec, Caps(), "/tmp/s.sock")
+    assert argv[argv.index("-kernel") + 1] == "/abs/bzImage"
+
+
+def test_argv_honors_spec_and_ctor_resources():
+    spec = {"kernel": "/k", "initrd": "/i", "cpus": 2, "memory": "512m",
+            "append": "nokaslr"}
+    argv = Qemu(cpus=1, memory="256m")._argv(spec, Caps(), "/s")
+    assert argv[argv.index("-smp") + 1] == "2"
+    assert argv[argv.index("-m") + 1] == "512m"
+    assert argv[argv.index("-append") + 1] == "console=ttyS0 nokaslr"
+
+
+def test_argv_needs_internet_raises():
+    with pytest.raises(ValueError, match="needs_internet"):
+        Qemu()._argv({"kernel": "/k", "initrd": "/i"}, Caps(needs_internet=True), "/s")
+
+
+def test_argv_missing_kernel_raises():
+    with pytest.raises(ValueError, match="requires 'kernel'"):
+        Qemu()._argv({"initrd": "/i"}, Caps(), "/s")
+
+
+def test_argv_relative_without_basedir_raises():
+    with pytest.raises(ValueError, match="requires a world.yml"):
+        Qemu()._argv({"kernel": "bzImage", "initrd": "i"}, Caps(), "/s")
+
+
+def test_up_rejects_needs_internet_without_spawning(tmp_path):
+    # The guard raises in _argv before Popen, so this never launches qemu.
+    with pytest.raises(ValueError, match="needs_internet"):
+        Qemu().up({"kernel": "/k", "initrd": "/i"}, Caps(needs_internet=True))
+
+
+def test_qemu_registered():
+    assert isinstance(resolve_backend("qemu"), Qemu)

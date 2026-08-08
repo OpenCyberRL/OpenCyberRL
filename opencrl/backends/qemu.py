@@ -104,3 +104,105 @@ class QemuWorld:
         if len(out) > _MAX_OUTPUT:
             out = out[:_MAX_OUTPUT] + "\n[opencrl: output truncated]"
         return out
+
+
+class Qemu:
+    def __init__(self, cpus: int = 1, memory: str = "256m", exec_timeout: float = 120.0,
+                 accel: str = "hvf:kvm:tcg", qemu_bin: str = "qemu-system-x86_64",
+                 boot_timeout: float = 60.0):
+        self.cpus = cpus
+        self.memory = memory
+        self.exec_timeout = exec_timeout
+        self.accel = accel
+        self.qemu_bin = qemu_bin
+        self.boot_timeout = boot_timeout
+
+    def _resolve(self, path, basedir: str, what: str) -> str:
+        if not path:
+            raise ValueError(f"opencrl: qemu world requires '{what}'")
+        if os.path.isabs(path):
+            return path
+        if not basedir:
+            raise ValueError(
+                f"opencrl: relative '{what}' path {path!r} requires a world.yml "
+                f"file (no basedir); use an absolute path in an inline world")
+        return os.path.join(basedir, path)
+
+    def _argv(self, spec: dict, caps: Caps, serial_sock: str) -> list[str]:
+        if caps.needs_internet:
+            raise ValueError(
+                "opencrl: the qemu backend has no networking; "
+                "needs_internet=True is not supported")
+        basedir = (spec.get("x-opencrl") or {}).get("basedir", "")
+        kernel = self._resolve(spec.get("kernel"), basedir, "kernel")
+        initrd = self._resolve(spec.get("initrd"), basedir, "initrd")
+        append = "console=ttyS0"
+        if spec.get("append"):
+            append += " " + str(spec["append"])
+        return [
+            self.qemu_bin,
+            "-kernel", kernel,
+            "-initrd", initrd,
+            "-append", append,
+            "-m", str(spec.get("memory", self.memory)),
+            "-smp", str(spec.get("cpus", self.cpus)),
+            "-nographic", "-monitor", "none", "-no-reboot",
+            "-serial", f"unix:{serial_sock},server,nowait",
+            "-machine", f"accel={self.accel}",
+        ]
+
+    def up(self, spec: dict, caps: Caps) -> QemuWorld:
+        spec = spec or {}
+        sock_dir = tempfile.mkdtemp(prefix="opencrl-qemu-")
+        serial_sock = os.path.join(sock_dir, "serial.sock")
+        try:
+            argv = self._argv(spec, caps, serial_sock)   # raises on bad spec first
+            proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE, text=True)
+        except Exception:
+            _teardown(None, None, sock_dir)
+            raise
+        try:
+            chan = _connect(serial_sock, proc, time.monotonic() + self.boot_timeout)
+            world = QemuWorld(proc, chan, sock_dir, exec_timeout=self.exec_timeout)
+            world._handshake()
+            return world
+        except Exception:
+            _teardown(proc, None, sock_dir)
+            raise
+
+    def down(self, world: QemuWorld) -> None:
+        _teardown(world.proc, world._chan, world._sock_dir)
+
+
+def _connect(sock_path: str, proc, deadline: float):
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(f"qemu exited before serial was ready (code {proc.returncode})")
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(sock_path)
+            return s
+        except OSError:
+            time.sleep(0.05)
+    raise TimeoutError("qemu serial socket did not become ready")
+
+
+def _teardown(proc, chan, sock_dir: str) -> None:
+    if chan is not None:
+        try:
+            chan.close()
+        except OSError:
+            pass
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    if sock_dir:
+        import shutil
+        shutil.rmtree(sock_dir, ignore_errors=True)
+
+
+register_backend("qemu", lambda: Qemu())
