@@ -100,6 +100,65 @@ the implicit default one services get if they list none — unless the task's
 `caps.needs_internet` is true. So `internal` above is unreachable from
 `attacker` except through whatever `web` exposes.
 
+## QEMU backend (kernel-target tasks)
+
+Use `backend="qemu"` when the challenge requires exploiting the guest's
+**own** kernel — an LPE, a vulnerable kernel module, a kernel-pwn CTF — a
+target Docker can't give you, since containers share the host kernel. For
+everything else (web, service pwn, lateral movement) stay on `docker`.
+
+The world spec is not Compose:
+
+```yaml
+# tasks/kernel_lpe/world.yml
+kernel: build/bzImage        # required
+initrd: build/rootfs.cpio.gz # required
+cpus: 1                      # optional, default 1
+memory: 256m                 # optional, default 256m
+append: "panic=1"            # optional, appended after the console=ttyS0
+                              # opencrl always sets
+```
+
+`kernel:`/`initrd:` paths follow the same rule as `Task.world` itself: resolved
+relative to the task's directory when `world.yml` is a file, or given as
+absolute paths. A relative path inside an inline `world=` dict (no backing
+file, so no directory to resolve against) raises.
+
+Minimal task:
+
+```python
+from opencrl import task, Task, shell, flag, Caps
+
+@task
+def kernel_lpe() -> Task:
+    return Task(
+        world="world.yml",     # kernel: build/bzImage  initrd: build/rootfs.cpio.gz
+        backend="qemu",
+        tools=[shell],
+        goal="You have an unprivileged shell. Exploit the kernel to read /root/flag.",
+        reward=flag("CTF{...}"),
+        caps=Caps(offensive=True),   # no needs_internet: the qemu backend has no network
+    )
+```
+
+The rootfs must boot straight to an **unprivileged** auto-login shell on
+`ttyS0` — no login prompt, no password, no root shell. Stock kernel-pwn
+`bzImage` + `rootfs.cpio.gz` artifacts (the kind CTF kernel challenges
+already ship) work as-is; the backend talks to that shell over the serial
+line.
+
+Constraints:
+
+- **Single guest.** One VM per task, no multi-host worlds.
+- **No networking.** The guest has none, by construction. A task with
+  `caps.needs_internet=True` raises when the backend brings the world up.
+- **x86_64 only**, via `qemu-system-x86_64`.
+- **Initramfs rootfs only** — no disk image, no ext4.
+
+`tests/fixtures/qemu/build.sh` is a worked example of building a minimal
+bootable kernel + busybox initramfs from source (Linux build host, network
+access required — not meant to run as-is in CI).
+
 ## Conformance: every task ships a reference solution
 
 Every task needs `tasks/mytask/test_task.py` with a `ScriptedModel` that
