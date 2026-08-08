@@ -31,6 +31,18 @@ def test_docker_no_egress_by_default():
     finally:
         backend.down(world)
 
+def test_docker_exec_survives_non_utf8_output():
+    # A command emitting bytes that aren't valid UTF-8 must not raise
+    # UnicodeDecodeError — _run decodes with errors="replace" instead of
+    # the strict default.
+    backend = Docker()
+    world = backend.up(SPEC, Caps())
+    try:
+        out = world.exec("printf '\\xff\\xfe\\xfd'")
+        assert isinstance(out, str)
+    finally:
+        backend.down(world)
+
 def test_docker_exec_bounded_by_timeout():
     # A hanging command (e.g. `sleep infinity`) must not hang the rollout or
     # teardown: exec() bounds it at exec_timeout and returns a sentinel

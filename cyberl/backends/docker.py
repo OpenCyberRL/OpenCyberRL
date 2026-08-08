@@ -26,7 +26,8 @@ _MAX_OUTPUT = 100_000
 
 
 def _run(args: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(args, capture_output=True, text=True,
+                          errors="replace", timeout=timeout)
 
 
 class DockerWorld:
@@ -105,7 +106,8 @@ class Docker:
                         f"cyberl: external network {name!r} is not allowed "
                         f"when needs_internet=False")
         for svc in services.values():
-            svc.setdefault("networks", [_NET])   # services with none join the default internal net
+            if not svc.get("networks"):        # None, missing, [], or {} -> default internal net
+                svc["networks"] = [_NET]
             if self.cpus is not None:
                 svc["cpus"] = self.cpus
             if self.memory is not None:

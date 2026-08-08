@@ -66,3 +66,18 @@ def test_render_rejects_top_level_include():
             "services": {"box": {"image": "x"}}}
     with pytest.raises(ValueError, match="include"):
         _render(spec)
+
+def test_render_empty_list_networks_joins_default_internal_net():
+    # `networks: []` is present (so setdefault would skip it) but falsy —
+    # must be treated the same as an omitted `networks:` key.
+    spec = {"services": {"box": {"image": "x", "networks": []}}}
+    doc, _ = _render(spec, Caps(needs_internet=False))
+    assert doc["networks"]["default"] == {"internal": True}
+    assert doc["services"]["box"]["networks"] == ["default"]
+
+def test_render_empty_dict_networks_joins_default_internal_net():
+    # Same as above but the falsy value is `{}` (the long-form mapping syntax).
+    spec = {"services": {"box": {"image": "x", "networks": {}}}}
+    doc, _ = _render(spec, Caps(needs_internet=False))
+    assert doc["networks"]["default"] == {"internal": True}
+    assert doc["services"]["box"]["networks"] == ["default"]

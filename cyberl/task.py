@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import sys
 import yaml
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -71,7 +72,12 @@ def discover(path="tasks") -> None:
             f"cyberl_tasks.{task_py.parent.name}", task_py
         )
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            del sys.modules[spec.name]
+            raise
 
 
 def load_world(task: "Task") -> dict:
