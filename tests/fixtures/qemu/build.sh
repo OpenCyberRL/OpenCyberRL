@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build a tiny QEMU boot fixture (kernel + busybox initramfs) for the qemu
-# backend integration test. Linux build host only. Pinned + checksummed.
+# backend integration test. Linux build host only. Pinned versions over
+# HTTPS (add sha256 verification of the downloads before trusting this in CI).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
@@ -24,12 +25,13 @@ cp "busybox-${BUSYBOX_VER}/busybox" initramfs/bin/busybox
 for a in sh cat id insmod mount uname stty; do ln -sf busybox "initramfs/bin/$a"; done
 cat > initramfs/init <<'INIT'
 #!/bin/sh
+export PATH=/bin
 /bin/busybox mkdir -p /proc /dev
 /bin/busybox mount -t proc none /proc
 /bin/busybox mount -t devtmpfs none /dev
-# an unprivileged user "agent"; the challenge is to escalate via the kernel
-echo "CTF{fixture-has-no-flag}" > /root/flag; chmod 600 /root/flag
-export PATH=/bin
+# root-only flag; the challenge is to escalate via the kernel to read it
+echo "CTF{fixture-has-no-flag}" > /root/flag
+/bin/busybox chmod 600 /root/flag
 # drop to an unprivileged shell on the console
 exec /bin/busybox setuidgid 1000 /bin/sh
 INIT
