@@ -100,3 +100,16 @@ def test_handshake_raises_if_shell_never_answers():
     import pytest
     with pytest.raises(TimeoutError):
         w._handshake()
+
+
+def test_read_until_fails_fast_on_eof():
+    # If the serial closes (qemu exits/panics), recv() returns b"" repeatedly;
+    # QemuWorld must fail fast instead of busy-spinning to the deadline.
+    class _EOFChan:
+        def sendall(self, data): pass
+        def recv(self, n): return b""
+        def settimeout(self, t): pass
+        def close(self): pass
+
+    w = QemuWorld(None, _EOFChan(), exec_timeout=5.0)
+    assert w.exec("id") == "[opencrl: command timed out after 5.0s]"

@@ -48,11 +48,12 @@ class QemuWorld:
                 chunk = self._chan.recv(4096)
             except (socket.timeout, TimeoutError):
                 raise TimeoutError
-            if chunk:
-                buf += chunk
-                m = pattern.search(buf)
-                if m:
-                    return m
+            if not chunk:                       # EOF: serial closed (qemu exited/panicked)
+                raise TimeoutError              # fail fast, don't busy-spin to the deadline
+            buf += chunk
+            m = pattern.search(buf)
+            if m:
+                return m
 
     def _drain(self, quiet: float = 0.3) -> None:
         """Discard buffered bytes (boot noise, echoed setup) until it goes quiet."""
