@@ -16,6 +16,9 @@ tar xf "busybox-${BUSYBOX_VER}.tar.bz2"
 cd "busybox-${BUSYBOX_VER}"
 make defconfig
 sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+# Fail loud if the sed no-oped (defconfig line format drift): a dynamically
+# linked busybox in an initramfs with no /lib panics at boot instead.
+grep -q '^CONFIG_STATIC=y' .config || { echo "ERROR: failed to enable CONFIG_STATIC in busybox .config" >&2; exit 1; }
 make -j"$(nproc)" busybox
 cd "$work"
 

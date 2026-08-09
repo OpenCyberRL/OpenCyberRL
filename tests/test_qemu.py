@@ -172,3 +172,32 @@ def test_up_rejects_needs_internet_without_spawning(tmp_path):
 
 def test_qemu_registered():
     assert isinstance(resolve_backend("qemu"), Qemu)
+
+
+def test_drain_is_bounded_on_a_never_idle_channel():
+    # A channel that never idles must not make _drain (and thus up()) hang.
+    class _NoisyChan:
+        def sendall(self, data): pass
+        def recv(self, n): return b"boot-noise "
+        def settimeout(self, t): pass
+        def close(self): pass
+
+    w = QemuWorld(None, _NoisyChan(), exec_timeout=0.3)
+    start = time.monotonic()
+    w._drain()                       # returns at the deadline; must not hang
+    assert time.monotonic() - start < 3.0
+
+
+def test_connect_surfaces_qemu_stderr_on_early_exit():
+    import io
+    from opencrl.backends.qemu import _connect
+
+    class _DeadProc:
+        returncode = 1
+        stderr = io.StringIO("qemu: could not load kernel 'bad'")
+        def poll(self):
+            return 1
+
+    with pytest.raises(RuntimeError, match="could not load kernel"):
+        _connect("/nonexistent/opencrl.sock", _DeadProc(),
+                 deadline=time.monotonic() + 1.0)

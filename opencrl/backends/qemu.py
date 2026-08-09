@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -56,9 +57,14 @@ class QemuWorld:
                 return m
 
     def _drain(self, quiet: float = 0.3) -> None:
-        """Discard buffered bytes (boot noise, echoed setup) until it goes quiet."""
+        """Discard buffered bytes (boot noise, echoed setup) until it goes quiet.
+
+        Bounded by exec_timeout so a kernel that never stops printing to the
+        console can't hang up().
+        """
         self._chan.settimeout(quiet)
-        while True:
+        deadline = time.monotonic() + self.exec_timeout
+        while time.monotonic() < deadline:
             try:
                 if not self._chan.recv(4096):
                     return
@@ -162,13 +168,14 @@ class Qemu:
         except Exception:
             _teardown(None, None, sock_dir)
             raise
+        chan = None
         try:
             chan = _connect(serial_sock, proc, time.monotonic() + self.boot_timeout)
             world = QemuWorld(proc, chan, sock_dir, exec_timeout=self.exec_timeout)
             world._handshake()
             return world
         except Exception:
-            _teardown(proc, None, sock_dir)
+            _teardown(proc, chan, sock_dir)
             raise
 
     def down(self, world: QemuWorld) -> None:
@@ -178,7 +185,9 @@ class Qemu:
 def _connect(sock_path: str, proc, deadline: float):
     while time.monotonic() < deadline:
         if proc.poll() is not None:
-            raise RuntimeError(f"qemu exited before serial was ready (code {proc.returncode})")
+            err = proc.stderr.read() if proc.stderr is not None else ""
+            raise RuntimeError(
+                f"qemu exited before serial was ready (code {proc.returncode}):\n{err}")
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.connect(sock_path)
@@ -201,7 +210,6 @@ def _teardown(proc, chan, sock_dir: str) -> None:
         except subprocess.TimeoutExpired:
             proc.kill()
     if sock_dir:
-        import shutil
         shutil.rmtree(sock_dir, ignore_errors=True)
 
 
