@@ -23,8 +23,13 @@ class FakeSerialShell:
         self._out = bytearray()     # queued bytes to hand back on recv
         self._line = bytearray()    # accumulates sent bytes until newline
         self._timeout = 0.0
+        self.sent = bytearray()     # every byte written, for interrupt assertions
 
     def sendall(self, data: bytes) -> None:
+        self.sent += data
+        if b"\x03" in data:                     # Ctrl-C discards the pending input line
+            self._line.clear()
+            data = data.rsplit(b"\x03", 1)[1]
         self._line += data
         while b"\n" in self._line:
             i = self._line.index(b"\n")
@@ -38,6 +43,9 @@ class FakeSerialShell:
             return                              # setup/drain line: no response
         mark = m.group(1)
         command = line[: m.start()].decode()
+        parts = shlex.split(command)
+        if len(parts) >= 3 and parts[0] == "sh" and parts[1] == "-c":
+            command = parts[2]                  # unwrap `sh -c '<cmd>'`
         if command in self._hang:
             return                              # never answer -> timeout
         output, rc = self._respond(command)
@@ -130,8 +138,9 @@ def test_argv_resolves_relative_paths_against_basedir():
     assert argv[argv.index("-serial") + 1] == "unix:/tmp/s.sock,server,nowait"
     assert argv[argv.index("-machine") + 1] == "accel=hvf:kvm:tcg"
     assert "console=ttyS0" in argv[argv.index("-append") + 1]
-    # no networking at all
-    assert not any(a in ("-netdev", "-net", "-nic") for a in argv)
+    # no networking: QEMU's default NIC is explicitly disabled, nothing else added
+    assert argv[argv.index("-nic") + 1] == "none"
+    assert not any(a in ("-netdev", "-net") for a in argv)
 
 
 def test_argv_keeps_absolute_paths():
@@ -188,16 +197,125 @@ def test_drain_is_bounded_on_a_never_idle_channel():
     assert time.monotonic() - start < 3.0
 
 
-def test_connect_surfaces_qemu_stderr_on_early_exit():
-    import io
+def test_connect_surfaces_qemu_stderr_on_early_exit(tmp_path):
     from opencrl.backends.qemu import _connect
+
+    errfile = tmp_path / "qemu.stderr"
+    errfile.write_text("qemu: could not load kernel 'bad'")
 
     class _DeadProc:
         returncode = 1
-        stderr = io.StringIO("qemu: could not load kernel 'bad'")
         def poll(self):
             return 1
 
     with pytest.raises(RuntimeError, match="could not load kernel"):
         _connect("/nonexistent/opencrl.sock", _DeadProc(),
-                 deadline=time.monotonic() + 1.0)
+                 deadline=time.monotonic() + 1.0, stderr_path=str(errfile))
+
+
+def test_exec_empty_command_returns_empty_without_timeout():
+    # `sh -c ''` frames cleanly (exit 0); the bare `; echo ...` form would
+    # have been a syntax error and hung until timeout.
+    w = QemuWorld(None, FakeSerialShell(), exec_timeout=0.3)
+    w._handshake()
+    assert w.exec("") == ""
+
+
+def test_exec_preserves_trailing_separator_without_timeout():
+    # "id;" once framed as "id;; echo ..." -> syntax error -> full timeout.
+    w = QemuWorld(None, FakeSerialShell(exec_map={"id;": "uid=1000(agent)"}),
+                  exec_timeout=0.3)
+    w._handshake()
+    assert w.exec("id;") == "uid=1000(agent)"
+
+
+def test_exec_interrupts_stuck_command_on_timeout():
+    # A timed-out command must be SIGINT'd so the single serial shell resyncs
+    # and later commands still work.
+    chan = FakeSerialShell(hang={"sleep 9999"}, exec_map={"id": "uid=1000(agent)"})
+    w = QemuWorld(None, chan, exec_timeout=0.2)
+    w._handshake()
+    assert w.exec("sleep 9999") == "[opencrl: command timed out after 0.2s]"
+    assert b"\x03" in chan.sent                  # interrupt delivered
+    assert w.exec("id") == "uid=1000(agent)"     # shell resynced, usable again
+
+
+def test_run_marked_strips_crlf_line_endings():
+    # A real serial tty ends lines with CRLF; the returned output must be clean.
+    class _CRLFChan:
+        def __init__(self):
+            self._out = bytearray()
+            self._line = bytearray()
+
+        def sendall(self, data):
+            self._line += data
+            if b"\n" not in self._line:
+                return
+            m = re.search(rb"echo (--opencrl-[0-9a-f]+--)", bytes(self._line))
+            self._line.clear()
+            if m:
+                mk = m.group(1)
+                self._out += b"hi\r\n" + mk + b"0" + mk + b"\r\n"
+
+        def recv(self, n):
+            if self._out:
+                chunk = bytes(self._out[:n])
+                del self._out[:n]
+                return chunk
+            raise socket.timeout
+
+        def settimeout(self, t):
+            pass
+
+        def close(self):
+            pass
+
+    w = QemuWorld(None, _CRLFChan(), exec_timeout=1.0)
+    assert w.exec("echo hi") == "hi"
+
+
+def test_exec_bounds_buffer_on_endless_producer():
+    # A producer that never emits the marker (like `yes`) must not grow memory
+    # without bound; exec returns the timeout sentinel and stays responsive.
+    class _FloodChan:
+        def sendall(self, data):
+            pass
+
+        def recv(self, n):
+            return b"y\n" * (n // 2)             # always full, never a marker
+
+        def settimeout(self, t):
+            pass
+
+        def close(self):
+            pass
+
+    w = QemuWorld(None, _FloodChan(), exec_timeout=0.3)
+    start = time.monotonic()
+    assert w.exec("yes") == "[opencrl: command timed out after 0.3s]"
+    assert time.monotonic() - start < 3.0
+
+
+def test_teardown_reaps_process_after_kill():
+    import subprocess
+    from opencrl.backends.qemu import _teardown
+
+    class _StuckProc:
+        def __init__(self):
+            self.calls = []
+            self._alive = True
+        def poll(self):
+            return None if self._alive else 0
+        def terminate(self):
+            self.calls.append("terminate")
+        def kill(self):
+            self.calls.append("kill")
+            self._alive = False
+        def wait(self, timeout=None):
+            self.calls.append(("wait", timeout))
+            if timeout == 5:                    # terminate() didn't stop it in time
+                raise subprocess.TimeoutExpired(cmd="qemu", timeout=5)
+
+    p = _StuckProc()
+    _teardown(p, None, "")
+    assert p.calls == ["terminate", ("wait", 5), "kill", ("wait", None)]
