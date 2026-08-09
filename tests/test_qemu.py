@@ -103,6 +103,15 @@ def test_exec_truncates_huge_output():
     assert len(out) <= 100_000 + len("\n[opencrl: output truncated]")
 
 
+def test_exec_truncates_large_multibyte_output():
+    # Output over the byte cap but under the char cap (100k `é` = 200k bytes)
+    # must still be reported as truncated, not silently concatenated.
+    w = QemuWorld(None, FakeSerialShell(exec_map={"big": "é" * 100_000}))
+    w._handshake()
+    out = w.exec("big")
+    assert out.endswith("[opencrl: output truncated]")
+
+
 def test_handshake_raises_if_shell_never_answers():
     w = QemuWorld(None, FakeSerialShell(hang={"true"}), exec_timeout=0.2)
     import pytest
@@ -195,6 +204,21 @@ def test_drain_is_bounded_on_a_never_idle_channel():
     start = time.monotonic()
     w._drain()                       # returns at the deadline; must not hang
     assert time.monotonic() - start < 3.0
+
+
+def test_drain_honors_short_bound_over_exec_timeout():
+    # The post-timeout resync must not run a second full exec_timeout: _drain
+    # respects the shorter bound even when exec_timeout is large.
+    class _NoisyChan:
+        def sendall(self, data): pass
+        def recv(self, n): return b"noise"
+        def settimeout(self, t): pass
+        def close(self): pass
+
+    w = QemuWorld(None, _NoisyChan(), exec_timeout=10.0)
+    start = time.monotonic()
+    w._drain(bound=0.3)
+    assert time.monotonic() - start < 3.0     # bounded by 0.3, not exec_timeout
 
 
 def test_connect_surfaces_qemu_stderr_on_early_exit(tmp_path):

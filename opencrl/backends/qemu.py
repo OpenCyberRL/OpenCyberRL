@@ -24,6 +24,8 @@ _MAX_OUTPUT = 100_000
 # Extra trailing bytes kept while scanning so the end marker is never split when
 # _read_until trims an over-long buffer (a continuous producer like `yes`).
 _MARKER_TAIL = 256
+# Brief bound for resyncing the shell after a timeout (not a 2nd exec_timeout).
+_RESYNC_TIMEOUT = 2.0
 
 
 class QemuWorld:
@@ -39,9 +41,14 @@ class QemuWorld:
     def _send(self, text: str) -> None:
         self._chan.sendall(text.encode())
 
-    def _read_until(self, pattern: "re.Pattern[bytes]") -> "re.Match[bytes]":
-        """Read until `pattern` matches; raise TimeoutError at exec_timeout."""
+    def _read_until(self, pattern: "re.Pattern[bytes]") -> tuple["re.Match[bytes]", bool]:
+        """Read until `pattern` matches; raise TimeoutError at exec_timeout.
+
+        Returns the match and whether the buffer was trimmed — trimmed output is
+        incomplete, so the caller must report truncation regardless of length.
+        """
         buf = bytearray()
+        trimmed = False
         deadline = time.monotonic() + self.exec_timeout
         while True:
             remaining = deadline - time.monotonic()
@@ -57,21 +64,23 @@ class QemuWorld:
             buf += chunk
             m = pattern.search(buf)
             if m:
-                return m
+                return m, trimmed
             # Bound memory against an endless producer (e.g. `yes`): keep the
             # first _MAX_OUTPUT bytes (all we'd ever return) plus a rolling tail
             # big enough that the end marker is never split by the trim.
             if len(buf) > _MAX_OUTPUT + _MARKER_TAIL:
                 del buf[_MAX_OUTPUT:-_MARKER_TAIL]
+                trimmed = True
 
-    def _drain(self, quiet: float = 0.3) -> None:
+    def _drain(self, quiet: float = 0.3, bound: float | None = None) -> None:
         """Discard buffered bytes (boot noise, echoed setup) until it goes quiet.
 
-        Bounded by exec_timeout so a kernel that never stops printing to the
-        console can't hang up().
+        Bounded (default: exec_timeout) so a kernel that never stops printing to
+        the console can't hang up(); callers already past a deadline pass a
+        shorter bound so draining can't run a second full timeout.
         """
         self._chan.settimeout(quiet)
-        deadline = time.monotonic() + self.exec_timeout
+        deadline = time.monotonic() + (self.exec_timeout if bound is None else bound)
         while time.monotonic() < deadline:
             try:
                 if not self._chan.recv(4096):
@@ -96,23 +105,29 @@ class QemuWorld:
         self._send(f"sh -c {shlex.quote(command)}; echo {mark}$?{mark}\n")
         mb = mark.encode()
         pattern = re.compile(re.escape(mb) + rb"(-?\d+)" + re.escape(mb))
-        m = self._read_until(pattern)
+        m, trimmed = self._read_until(pattern)
         out = bytes(m.string[: m.start()]).decode(errors="replace")
         if out.endswith("\r\n"):        # a real serial tty terminates lines with CRLF
             out = out[:-2]
         elif out.endswith("\n"):
             out = out[:-1]
+        # Truncate in one place so a trimmed (over-long) buffer is always
+        # reported, even when multibyte output has fewer chars than bytes.
+        if trimmed or len(out) > _MAX_OUTPUT:
+            out = out[:_MAX_OUTPUT] + "\n[opencrl: output truncated]"
         return out, int(m.group(1))
 
     def _interrupt(self) -> None:
         """SIGINT the stuck foreground command so the one serial shell resyncs.
 
         A timed-out command keeps running in the sole persistent shell; without
-        this, every later command would queue behind it and also time out.
+        this, every later command would queue behind it and also time out. The
+        drain uses a short bound, not another full exec_timeout, since we are
+        already past the deadline.
         """
         try:
             self._send("\x03")          # Ctrl-C
-            self._drain()
+            self._drain(bound=min(_RESYNC_TIMEOUT, self.exec_timeout))
         except OSError:
             pass
 
@@ -123,8 +138,6 @@ class QemuWorld:
         except TimeoutError:
             self._interrupt()
             return f"[opencrl: command timed out after {self.exec_timeout}s]"
-        if len(out) > _MAX_OUTPUT:
-            out = out[:_MAX_OUTPUT] + "\n[opencrl: output truncated]"
         return out
 
     def read_file(self, path: str, host: str | None = None) -> str | None:
@@ -135,8 +148,6 @@ class QemuWorld:
             return None
         if rc != 0:
             return None
-        if len(out) > _MAX_OUTPUT:
-            out = out[:_MAX_OUTPUT] + "\n[opencrl: output truncated]"
         return out
 
 
