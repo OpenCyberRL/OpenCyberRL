@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from opencrl.backend import Backend
     from opencrl.state import State
     from opencrl.tools import Tool
+    from opencrl.reward import Score
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class Caps:
 class Task:
     """A self-contained cyber task. Frozen: no methods, no lifecycle."""
     goal: str
-    reward: "Callable[[State], float]"
+    reward: "Callable[[State], float | Score]"
     world: "str | dict | None" = None
     backend: "str | Backend" = "docker"
     tools: tuple = ()

@@ -1,7 +1,7 @@
 import json
 from opencrl.task import Task, Caps
 from opencrl.tools import shell
-from opencrl.reward import flag
+from opencrl.reward import flag, contains, stage, chain
 from opencrl.models import ScriptedModel
 from opencrl.backends.mock import MockBackend
 from opencrl.rollout import rollout, Rollout
@@ -58,3 +58,39 @@ def test_rollout_to_dict_has_caps():
     d = rollout(make_task(), solved_model(), backend=backend).to_dict()
     assert d["reward"] == 1.0
     assert d["caps"]["offensive"] is True
+
+def staged_task():
+    return Task(
+        goal="Get root, then read the flag.",
+        reward=chain(
+            stage("root", contains("uid=0")),
+            stage("flag", flag("CTF{win}")),
+        ),
+        tools=(shell,),
+        max_steps=5,
+    )
+
+
+def staged_model():
+    return ScriptedModel([
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "a", "type": "function",
+                         "function": {"name": "shell",
+                                      "arguments": json.dumps({"command": "id"})}}]},
+        {"role": "assistant", "content": "the flag is CTF{win}", "tool_calls": None},
+    ])
+
+
+def test_rollout_carries_stage_breakdown():
+    backend = MockBackend(exec_map={"id": "uid=0(root) gid=0(root)"})
+    r = rollout(staged_task(), staged_model(), backend=backend)
+    assert r.reward == 1.0
+    assert r.stages == {"root": 1.0, "flag": 1.0}
+    assert r.to_dict()["stages"] == {"root": 1.0, "flag": 1.0}
+
+
+def test_rollout_scalar_reward_has_no_stages():
+    backend = MockBackend(exec_map={"cat /flag": "CTF{win}"})
+    r = rollout(make_task(), solved_model(), backend=backend)   # existing scalar task
+    assert r.stages is None
+    assert r.to_dict()["stages"] is None
