@@ -1,0 +1,13 @@
+[book]
+title = "OpenCyberRL"
+description = "Author sandboxed cybersecurity RL tasks and evaluate LLM tool-calling agents."
+authors = ["OpenCyberRL contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "html"
+
+[output.html]
+git-repository-url = "https://github.com/OpenCyberRL/OpenCyberRL"
+edit-url-template = "https://github.com/OpenCyberRL/OpenCyberRL/edit/main/docs/src/{path}"

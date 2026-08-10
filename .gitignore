@@ -1,4 +1,5 @@
-docs/
+_docs/
+docs/html/
 .superpowers/
 .venv/
 __pycache__/
