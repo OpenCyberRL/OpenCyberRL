@@ -61,6 +61,8 @@ def _cmd_eval(args) -> int:
     stats = evaluate(get_task(args.name), _build_model(args),
                      n=args.n, out=args.out)
     print(f"n={stats['n']} mean_reward={stats['mean_reward']}")
+    for name, mean in (stats["stage_means"] or {}).items():
+        print(f"  {name}: {mean}")
     return 0
 
 

@@ -53,3 +53,22 @@ def test_run_prints_stage_breakdown(monkeypatch, capsys):
     assert "reward=0.5" in out
     assert "root: 1.0" in out
     assert "flag: 0.0" in out
+
+def test_eval_prints_stage_means(monkeypatch, capsys):
+    import sys
+    import opencrl.cli as cli
+
+    stats = {"n": 2, "mean_reward": 0.5, "rewards": [1.0, 0.0],
+             "stage_means": {"root": 1.0, "flag": 0.0}}
+    monkeypatch.setattr(cli, "discover", lambda path: None)
+    monkeypatch.setattr(cli, "get_task", lambda name: object())
+    monkeypatch.setattr(cli, "_build_model", lambda args: object())
+    eval_mod = sys.modules["opencrl.adapters.eval"]
+    monkeypatch.setattr(eval_mod, "evaluate", lambda task, model, n, out: stats)
+
+    rc = cli.main(["eval", "whatever"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "mean_reward=0.5" in out
+    assert "root: 1.0" in out
+    assert "flag: 0.0" in out
