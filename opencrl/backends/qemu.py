@@ -79,9 +79,15 @@ class QemuWorld:
         the console can't hang up(); callers already past a deadline pass a
         shorter bound so draining can't run a second full timeout.
         """
-        self._chan.settimeout(quiet)
         deadline = time.monotonic() + (self.exec_timeout if bound is None else bound)
-        while time.monotonic() < deadline:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            # Cap each read by whichever is smaller — the idle window or the
+            # time left — so a short bound stays a real wall-clock limit even
+            # when it is under `quiet`.
+            self._chan.settimeout(min(quiet, remaining))
             try:
                 if not self._chan.recv(4096):
                     return

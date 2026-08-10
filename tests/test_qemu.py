@@ -221,6 +221,27 @@ def test_drain_honors_short_bound_over_exec_timeout():
     assert time.monotonic() - start < 3.0     # bounded by 0.3, not exec_timeout
 
 
+def test_drain_short_bound_beats_the_idle_window():
+    # A quiet socket that honors settimeout: recv blocks for the whole read
+    # timeout, then reports idle. With a bound under `quiet`, each read must be
+    # capped to the time left, so _drain returns near the bound — not after a
+    # full `quiet` (0.3s) window.
+    class _QuietChan:
+        def __init__(self):
+            self._timeout = 0.0
+        def sendall(self, data): pass
+        def settimeout(self, t): self._timeout = t
+        def recv(self, n):
+            time.sleep(self._timeout)   # idle: block for the whole read timeout
+            raise socket.timeout
+        def close(self): pass
+
+    w = QemuWorld(None, _QuietChan(), exec_timeout=10.0)
+    start = time.monotonic()
+    w._drain(bound=0.05)
+    assert time.monotonic() - start < 0.2    # ~0.05, not the 0.3s idle window
+
+
 def test_connect_surfaces_qemu_stderr_on_early_exit(tmp_path):
     from opencrl.backends.qemu import _connect
 
