@@ -111,7 +111,10 @@ class Sandbox:
 
 def _teardown(name: str, workdir: str, sbx_bin: str) -> None:
     if name:
-        _run([sbx_bin, "rm", "--force", name], timeout=None)
+        try:
+            _run([sbx_bin, "rm", "--force", name], timeout=None)
+        except OSError:
+            pass
     if workdir:
         shutil.rmtree(workdir, ignore_errors=True)
 

@@ -1,6 +1,10 @@
+import os
 import subprocess
+
 import pytest
+
 from opencrl.backends import sandbox as sbx
+from opencrl.task import Caps
 
 
 def cp(returncode=0, stdout="", stderr=""):
@@ -59,8 +63,19 @@ def test_read_file_missing_returns_none(monkeypatch):
     assert sbx.SandboxWorld("n", "/tmp/wd").read_file("/nope") is None
 
 
-import os
-from opencrl.task import Caps
+def test_read_file_timeout_returns_none(monkeypatch):
+    def boom(args, timeout=None):
+        raise subprocess.TimeoutExpired(args, timeout)
+    monkeypatch.setattr(sbx, "_run", boom)
+    w = sbx.SandboxWorld("n", "/tmp/wd", exec_timeout=1.0)
+    assert w.read_file("/root/flag") is None
+
+
+def test_read_file_caps_large_output(monkeypatch):
+    monkeypatch.setattr(sbx, "_run", Recorder(routes={"cp": cp(stdout="x" * 200_000)}))
+    out = sbx.SandboxWorld("n", "/tmp/wd").read_file("/big")
+    assert out.endswith("\n[opencrl: output truncated]")
+    assert len(out) <= 100_000 + len("\n[opencrl: output truncated]")
 
 
 def test_kit_denies_egress_by_default():
@@ -93,12 +108,25 @@ def test_up_creates_sandbox_and_runs_setup_in_order(monkeypatch):
         s.down(w)
 
 
+def test_up_resolves_files_path_into_create_argv(monkeypatch):
+    rec = Recorder()
+    monkeypatch.setattr(sbx, "_run", rec)
+    s = sbx.Sandbox()
+    w = s.up({"image": "x", "files": "/abs/payload"}, Caps())
+    try:
+        create_call = next(c for c in rec.calls if c[1] == "create")
+        assert create_call[-1] == "/abs/payload"
+    finally:
+        s.down(w)
+
+
 def test_up_raises_and_cleans_up_on_create_failure(monkeypatch):
     rec = Recorder(routes={"create": cp(returncode=1, stderr="boom")})
     monkeypatch.setattr(sbx, "_run", rec)
     with pytest.raises(RuntimeError, match="boom"):
         sbx.Sandbox().up({"image": "x"}, Caps())
-    assert ["sbx", "rm", "--force"] == [c[:3] for c in rec.calls if c[1] == "rm"][0][:3]
+    rm_calls = [c for c in rec.calls if c[1] == "rm"]
+    assert rm_calls[0][:3] == ["sbx", "rm", "--force"]
 
 
 def test_up_raises_on_setup_failure(monkeypatch):
