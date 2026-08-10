@@ -6,7 +6,7 @@ understand the whole surface.
 from opencrl.task import Caps, Task, task, get_task, list_tasks, discover
 from opencrl.tools import Tool, shell
 from opencrl.state import State
-from opencrl.reward import flag, contains, file_exists
+from opencrl.reward import flag, contains, file_exists, stage, chain, goals, Score
 from opencrl.backend import register_backend, resolve_backend
 from opencrl.backends.mock import MockBackend
 from opencrl.backends.docker import Docker
@@ -18,7 +18,7 @@ from opencrl.adapters.gym import to_gym
 
 __all__ = [
     "task", "Task", "Caps", "Tool", "shell",
-    "flag", "contains", "file_exists",
+    "flag", "contains", "file_exists", "stage", "chain", "goals", "Score",
     "rollout", "Rollout", "State", "evaluate", "to_gym",
     "Docker", "Qemu", "MockBackend", "ScriptedModel", "OpenAIModel",
     "register_backend", "resolve_backend",

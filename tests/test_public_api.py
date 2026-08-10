@@ -3,6 +3,7 @@ def test_public_surface_imports():
     for name in [
         "task", "Task", "Caps", "Tool", "shell",
         "flag", "contains", "file_exists",
+        "stage", "chain", "goals", "Score",
         "rollout", "Rollout", "State", "evaluate", "to_gym",
         "Docker", "Qemu", "MockBackend", "ScriptedModel", "OpenAIModel",
         "register_backend", "resolve_backend",
