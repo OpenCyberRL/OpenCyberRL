@@ -50,6 +50,8 @@ def _cmd_run(args) -> int:
     for m in r.transcript:
         print(f"[{m['role']}] {m.get('content') or m.get('tool_calls')}")
     print(f"reward={r.reward}")
+    for name, s in (r.stages or {}).items():
+        print(f"  {name}: {s}")
     return 0
 
 
