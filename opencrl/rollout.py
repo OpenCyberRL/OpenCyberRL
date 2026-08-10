@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict, dataclass
 
 from opencrl.backend import resolve_backend
-from opencrl.reward import Score
+from opencrl.reward import resolve_reward
 from opencrl.state import State
 from opencrl.task import Caps, Task, load_world
 
@@ -81,11 +81,7 @@ def rollout(task: Task, model, backend=None) -> Rollout:
                 continue
             answer = reply.get("content") or ""
             break
-        scored = task.reward(episode.state(answer))
-        if isinstance(scored, Score):
-            reward, stages = scored.value, dict(scored.stages)
-        else:
-            reward, stages = float(scored), None
+        reward, stages = resolve_reward(task.reward(episode.state(answer)))
         return Rollout(task.name, episode.transcript, reward, task.caps, stages)
     finally:
         backend.down(world)

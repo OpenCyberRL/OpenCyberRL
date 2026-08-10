@@ -5,6 +5,7 @@ gymnasium is imported lazily so the core never depends on it.
 from __future__ import annotations
 
 from opencrl.backend import resolve_backend
+from opencrl.reward import resolve_reward
 from opencrl.rollout import Episode
 from opencrl.task import Task, load_world
 
@@ -63,11 +64,11 @@ def to_gym(task: Task, backend=None):
                     self._episode.run_tool_calls(action["tool_calls"]))
                 if self._steps >= self._task.max_steps:
                     # match rollout(): score the verifier at the step budget
-                    reward = float(self._task.reward(self._episode.state("")))
+                    reward, _ = resolve_reward(self._task.reward(self._episode.state("")))
                     return list(self._episode.transcript), reward, False, True, {}
                 return list(self._episode.transcript), 0.0, False, False, {}
             answer = action.get("content") or ""
-            reward = float(self._task.reward(self._episode.state(answer)))
+            reward, _ = resolve_reward(self._task.reward(self._episode.state(answer)))
             return list(self._episode.transcript), reward, True, False, {}
 
         def close(self):

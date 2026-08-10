@@ -125,3 +125,12 @@ def test_bad_stage_args_raise():
         stage("", lambda s: 1.0)
     with pytest.raises(TypeError):
         stage("nc", "not-callable")
+
+
+def test_resolve_reward_splits_score_and_float():
+    from opencrl.reward import resolve_reward
+    r, st = resolve_reward(0.7)
+    assert r == 0.7 and st is None
+    sc = goals(stage("a", lambda s: 1.0), stage("b", lambda s: 0.0))(make_state())
+    r, st = resolve_reward(sc)
+    assert r == 0.5 and st == {"a": 1.0, "b": 0.0}

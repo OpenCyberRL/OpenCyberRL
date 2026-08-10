@@ -99,3 +99,16 @@ def goals(*stages: Stage) -> Callable[[State], Score]:
     """Independent sub-goals: every stage scores on its own; shares are summed."""
     _validate(stages)
     return lambda state: _evaluate(stages, state, gated=False)
+
+
+def resolve_reward(scored: float | Score) -> tuple[float, dict[str, float] | None]:
+    """Split a reward function's result into (aggregate float, optional breakdown).
+
+    A Score yields (its value, a copy of its stage breakdown); a plain float
+    yields (float(scored), None). Every reward consumer — the rollout loop and
+    the gym adapter — routes through here so the float|Score contract lives in
+    one place.
+    """
+    if isinstance(scored, Score):
+        return scored.value, dict(scored.stages)
+    return float(scored), None

@@ -4,7 +4,7 @@ gym = pytest.importorskip("gymnasium")
 
 from opencrl.task import Task, Caps
 from opencrl.tools import shell
-from opencrl.reward import flag, file_exists
+from opencrl.reward import flag, file_exists, contains, stage, chain
 from opencrl.backends.mock import MockBackend
 from opencrl.adapters.gym import to_gym
 
@@ -77,3 +77,26 @@ def test_gym_env_step_cycle():
     obs, reward, terminated, truncated, info = env.step(
         {"role": "assistant", "content": "CTF{win}", "tool_calls": None})
     assert terminated and reward == 1.0
+
+def test_gym_env_scores_staged_reward_as_aggregate_float():
+    # A Score-returning (staged) reward must flow through step() as the aggregate
+    # float — to_gym scores by calling task.reward directly, not via Rollout.reward.
+    task = Task(
+        goal="g",
+        reward=chain(stage("root", contains("uid=0")),
+                     stage("flag", flag("CTF{win}"))),
+        tools=(shell,), max_steps=5,
+    )
+    env = to_gym(task, backend=MockBackend(exec_map={"id": "uid=0(root)"}))
+    env.reset()
+    # tool-calling turn: puts "uid=0(root)" in the transcript so `root` scores 1.0
+    env.step({"role": "assistant", "content": None,
+              "tool_calls": [{"id": "1", "type": "function",
+                              "function": {"name": "shell",
+                                           "arguments": json.dumps({"command": "id"})}}]})
+    # final answer lacks the flag: chain gives root=1.0 (0.5 share), flag=0.0 -> 0.5
+    obs, reward, terminated, truncated, info = env.step(
+        {"role": "assistant", "content": "no flag found", "tool_calls": None})
+    assert terminated and not truncated
+    assert reward == 0.5
+    assert isinstance(reward, float)
