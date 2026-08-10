@@ -14,7 +14,7 @@ import uuid
 
 import yaml
 
-from opencrl.backend import register_backend
+from opencrl.backend import basedir_of, register_backend, resolve_path
 from opencrl.task import Caps
 
 # Cap on any single exec/read_file's returned output (mirrors the docker backend).
@@ -69,15 +69,6 @@ class Sandbox:
         self.exec_timeout = exec_timeout
         self.sbx_bin = sbx_bin
 
-    def _resolve(self, path: str, basedir: str, what: str) -> str:
-        if os.path.isabs(path):
-            return path
-        if not basedir:
-            raise ValueError(
-                f"opencrl: relative '{what}' path {path!r} requires a world.yml "
-                f"file (no basedir); use an absolute path in an inline world")
-        return os.path.join(basedir, path)
-
     def _kit(self, spec: dict, caps: Caps) -> dict:
         image = spec.get("image")
         if not image:
@@ -91,7 +82,7 @@ class Sandbox:
 
     def up(self, spec: dict, caps: Caps) -> SandboxWorld:
         spec = spec or {}
-        basedir = (spec.get("x-opencrl") or {}).get("basedir", "")
+        basedir = basedir_of(spec)
         kit = self._kit(spec, caps)                  # raises on missing image first
         name = f"opencrl-{uuid.uuid4().hex[:8]}"
         workdir = tempfile.mkdtemp(prefix="opencrl-sbx-")
@@ -101,7 +92,7 @@ class Sandbox:
                 yaml.safe_dump(kit, f)
             argv = [self.sbx_bin, "create", "--name", name, "--kit", kit_path]
             if spec.get("files"):
-                argv.append(self._resolve(spec["files"], basedir, "files"))
+                argv.append(resolve_path(spec["files"], basedir, "files"))
             cp = _run(argv, timeout=None)
             if cp.returncode != 0:
                 raise RuntimeError(f"sbx create failed:\n{cp.stderr}")

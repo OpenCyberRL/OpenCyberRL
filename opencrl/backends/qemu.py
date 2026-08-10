@@ -16,7 +16,7 @@ import tempfile
 import time
 import uuid
 
-from opencrl.backend import register_backend
+from opencrl.backend import basedir_of, register_backend, resolve_path
 from opencrl.task import Caps
 
 # Cap on any single exec/read_file's returned output (mirrors the docker backend).
@@ -168,25 +168,20 @@ class Qemu:
         self.qemu_bin = qemu_bin
         self.boot_timeout = boot_timeout
 
-    def _resolve(self, path, basedir: str, what: str) -> str:
-        if not path:
-            raise ValueError(f"opencrl: qemu world requires '{what}'")
-        if os.path.isabs(path):
-            return path
-        if not basedir:
-            raise ValueError(
-                f"opencrl: relative '{what}' path {path!r} requires a world.yml "
-                f"file (no basedir); use an absolute path in an inline world")
-        return os.path.join(basedir, path)
-
     def _argv(self, spec: dict, caps: Caps, serial_sock: str) -> list[str]:
         if caps.needs_internet:
             raise ValueError(
                 "opencrl: the qemu backend has no networking; "
                 "needs_internet=True is not supported")
-        basedir = (spec.get("x-opencrl") or {}).get("basedir", "")
-        kernel = self._resolve(spec.get("kernel"), basedir, "kernel")
-        initrd = self._resolve(spec.get("initrd"), basedir, "initrd")
+        basedir = basedir_of(spec)
+        kernel = spec.get("kernel")
+        if not kernel:
+            raise ValueError("opencrl: qemu world requires 'kernel'")
+        initrd = spec.get("initrd")
+        if not initrd:
+            raise ValueError("opencrl: qemu world requires 'initrd'")
+        kernel = resolve_path(kernel, basedir, "kernel")
+        initrd = resolve_path(initrd, basedir, "initrd")
         append = "console=ttyS0"
         if spec.get("append"):
             append += " " + str(spec["append"])

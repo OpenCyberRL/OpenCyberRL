@@ -11,7 +11,7 @@ import uuid
 
 import yaml
 
-from opencrl.backend import register_backend
+from opencrl.backend import basedir_of, register_backend
 from opencrl.task import Caps
 
 # Compose's own `default` network: services that declare no `networks:` are
@@ -123,7 +123,7 @@ class Docker:
     def up(self, spec: dict, caps: Caps) -> DockerWorld:
         spec = spec or {}
         # Read before _render pops `x-opencrl` off the spec.
-        basedir = (spec.get("x-opencrl") or {}).get("basedir", "")
+        basedir = basedir_of(spec)
         doc, agent = self._render(spec, caps)
         project = f"opencrl-{uuid.uuid4().hex[:8]}"
         fd, path = tempfile.mkstemp(prefix="opencrl-", suffix=".yml")
