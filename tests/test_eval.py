@@ -1,7 +1,7 @@
 import json
 from opencrl.task import Task, Caps
 from opencrl.tools import shell
-from opencrl.reward import flag
+from opencrl.reward import flag, contains, stage, chain
 from opencrl.backends.mock import MockBackend
 from opencrl.adapters.eval import evaluate
 
@@ -20,3 +20,28 @@ def test_evaluate_writes_jsonl_and_reports(tmp_path):
     lines = out.read_text().strip().splitlines()
     assert len(lines) == 3
     assert json.loads(lines[0])["reward"] == 1.0
+
+
+def staged_task():
+    # both stages are satisfied by scanning the transcript/answer, so a
+    # one-step model (no tool call) works and can be reused across rollouts.
+    return Task(goal="g", name="staged", max_steps=3, tools=(shell,),
+                reward=chain(stage("saw_root", contains("uid=0")),
+                             stage("got_flag", flag("CTF{win}"))))
+
+
+def test_evaluate_reports_stage_means(tmp_path):
+    model = lambda m, t: {"role": "assistant",
+                          "content": "ran id -> uid=0; the flag is CTF{win}",
+                          "tool_calls": None}
+    stats = evaluate(staged_task(), model, n=3, out=str(tmp_path / "l.jsonl"),
+                     backend=MockBackend())
+    assert stats["mean_reward"] == 1.0
+    assert stats["stage_means"] == {"saw_root": 1.0, "got_flag": 1.0}
+
+
+def test_evaluate_scalar_task_has_empty_stage_means(tmp_path):
+    model = lambda m, t: {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+    stats = evaluate(make_task(), model, n=2, out=str(tmp_path / "l.jsonl"),
+                     backend=MockBackend())
+    assert stats["stage_means"] == {}
