@@ -23,10 +23,11 @@ build-backend = "hatchling.build"
 packages = ["opencrl"]
 
 [tool.pytest.ini_options]
-addopts = "-m 'not docker and not qemu' --import-mode=importlib"
+addopts = "-m 'not docker and not qemu and not sandbox' --import-mode=importlib"
 markers = [
     "docker: integration tests that require Docker (deselected by default)",
     "qemu: integration tests that require QEMU (deselected by default)",
+    "sandbox: integration tests that require the sbx CLI (deselected by default)",
 ]
 
 [dependency-groups]
