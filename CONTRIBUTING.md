@@ -196,7 +196,11 @@ def sandboxed() -> Task:
 ```
 
 The microVM has no external egress unless the task's `caps.needs_internet`
-is set.
+is set. The Docker Sandbox proxy ships a built-in allowlist (GitHub, PyPI,
+npm, the AI-provider APIs, …) that a plain deny-policy leaves open, so the
+backend blocks every allowlisted domain to airgap the guest. It reads that
+allowlist from the sandbox daemon's config; if it cannot, a no-egress task
+fails closed (errors) rather than running with egress.
 
 ## Conformance: every task ships a reference solution
 

@@ -6,6 +6,8 @@ backend. No external egress unless the task sets caps.needs_internet.
 """
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -30,6 +32,22 @@ def _cap(text: str) -> str:
     if len(text) > _MAX_OUTPUT:
         return text[:_MAX_OUTPUT] + "\n[opencrl: output truncated]"
     return text
+
+
+# The sandbox proxy keeps a built-in allowlist (github, pypi, npm, the AI-provider
+# APIs, …) that `--policy deny` does NOT drop. To airgap a no-egress world we must
+# block each allowed domain explicitly, reading the daemon's current allowlist so
+# this tracks the installed version rather than a hard-coded snapshot.
+_PROXY_CONFIG = os.path.expanduser("~/.sandboxd/proxy-config.json")
+
+
+def _proxy_allowlist() -> "list[str] | None":
+    """Domains the sandbox proxy allows by default, or None if it can't be read."""
+    try:
+        with open(_PROXY_CONFIG) as f:
+            return json.load(f).get("network", {}).get("allowedDomains", [])
+    except (OSError, ValueError):
+        return None
 
 
 class SandboxWorld:
@@ -79,16 +97,28 @@ class Sandbox:
         workspace = tempfile.mkdtemp(prefix="opencrl-sbx-")
         try:
             if spec.get("files"):
+                # symlinks=True copies links verbatim; without it copytree would
+                # dereference a link in `files` and copy a host file's *contents*
+                # into the guest-readable workspace.
                 shutil.copytree(resolve_path(spec["files"], basedir, "files"),
-                                workspace, dirs_exist_ok=True)
+                                workspace, dirs_exist_ok=True, symlinks=True)
             create = _run([*_CLI, "create", "--name", name, "--template", image,
                            self.agent, workspace], timeout=None)
             if create.returncode != 0:
                 raise RuntimeError(f"docker sandbox create failed:\n{create.stderr}")
             if not caps.needs_internet:
-                # Deny all egress; the sandbox proxy otherwise defaults to allow.
-                deny = _run([*_CLI, "network", "proxy", name, "--policy", "deny"],
-                            timeout=None)
+                # `--policy deny` only blocks non-allowlisted egress, so also block
+                # every built-in allowlisted domain to actually airgap the guest.
+                allow = _proxy_allowlist()
+                if allow is None:
+                    raise RuntimeError(
+                        "opencrl: cannot read the Docker Sandbox proxy allowlist "
+                        f"({_PROXY_CONFIG}) to enforce no egress. Set "
+                        "caps(needs_internet=True) to allow network, or use the "
+                        "docker/qemu backend for a guaranteed airgap.")
+                block = [a for domain in allow for a in ("--block-host", domain)]
+                deny = _run([*_CLI, "network", "proxy", name, "--policy", "deny",
+                             *block], timeout=None)
                 if deny.returncode != 0:
                     raise RuntimeError(
                         f"docker sandbox network proxy (deny) failed:\n{deny.stderr}")

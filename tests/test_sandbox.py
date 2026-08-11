@@ -27,6 +27,15 @@ class Recorder:
         return r
 
 
+@pytest.fixture(autouse=True)
+def _stub_allowlist(monkeypatch):
+    # up() reads the daemon proxy allowlist to block it; stub it so unit tests
+    # never touch ~/.sandboxd. A test can re-monkeypatch to None to exercise
+    # the fail-closed path.
+    monkeypatch.setattr(sbx, "_proxy_allowlist",
+                        lambda: ["github.com:443", "pypi.org:443"])
+
+
 # --- SandboxWorld -------------------------------------------------------
 
 def test_exec_runs_docker_sandbox_exec_and_returns_output(monkeypatch):
@@ -103,17 +112,27 @@ def test_up_creates_with_template_and_agent_then_runs_setup_in_order(monkeypatch
         s.down(w)
 
 
-def test_up_denies_egress_by_default(monkeypatch):
+def test_up_denies_egress_and_blocks_the_allowlist_by_default(monkeypatch):
     rec = Recorder()
     monkeypatch.setattr(sbx, "_run", rec)
     s = sbx.Sandbox()
     w = s.up({"image": "x"}, Caps())
     try:
         proxy = next(c for c in rec.calls if c[2] == "network")
+        # deny the default policy AND block each built-in allowlist entry
         assert proxy == ["docker", "sandbox", "network", "proxy", w.name,
-                         "--policy", "deny"]
+                         "--policy", "deny",
+                         "--block-host", "github.com:443",
+                         "--block-host", "pypi.org:443"]
     finally:
         s.down(w)
+
+
+def test_up_fails_closed_when_allowlist_unreadable(monkeypatch):
+    monkeypatch.setattr(sbx, "_run", Recorder())
+    monkeypatch.setattr(sbx, "_proxy_allowlist", lambda: None)
+    with pytest.raises(RuntimeError, match="cannot read"):
+        sbx.Sandbox().up({"image": "x"}, Caps())
 
 
 def test_up_allows_egress_with_needs_internet(monkeypatch):
@@ -139,6 +158,25 @@ def test_up_copies_files_into_workspace(monkeypatch, tmp_path):
         create = next(c for c in rec.calls if c[2] == "create")
         workspace = create[-1]                          # the mounted workspace
         assert os.path.isfile(os.path.join(workspace, "vuln"))
+    finally:
+        s.down(w)
+
+
+def test_up_preserves_symlinks_rather_than_inlining_host_files(monkeypatch, tmp_path):
+    # A link in `files` escaping the tree must be copied as a link (dangling in
+    # the guest), NOT dereferenced into the host file's contents.
+    src = tmp_path / "payload"
+    src.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("HOST-SECRET")
+    os.symlink(secret, src / "link")
+    rec = Recorder()
+    monkeypatch.setattr(sbx, "_run", rec)
+    s = sbx.Sandbox()
+    w = s.up({"image": "x", "files": str(src)}, Caps())
+    try:
+        workspace = next(c for c in rec.calls if c[2] == "create")[-1]
+        assert os.path.islink(os.path.join(workspace, "link"))   # link, not the secret
     finally:
         s.down(w)
 
