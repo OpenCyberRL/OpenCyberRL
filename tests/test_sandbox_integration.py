@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 
 import pytest
 
@@ -7,9 +8,20 @@ from opencrl.backends.sandbox import Sandbox
 
 pytestmark = pytest.mark.sandbox
 
+
+def _has_docker_sandbox() -> bool:
+    if shutil.which("docker") is None:
+        return False
+    try:
+        return subprocess.run(["docker", "sandbox", "version"],
+                              capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
 _skip = pytest.mark.skipif(
-    shutil.which("sbx") is None,
-    reason="the sbx CLI (Docker Sandboxes) is required",
+    not _has_docker_sandbox(),
+    reason="the `docker sandbox` CLI (Docker Sandboxes) is required",
 )
 
 
@@ -21,8 +33,8 @@ def test_sandbox_boots_and_execs():
         Caps(),
     )
     try:
-        assert "root" in world.exec("id")
+        assert "uid=0(root)" in world.exec("id")             # the microVM shell
         assert world.read_file("/root/flag").strip() == "CTF{sbx}"
-        assert world.read_file("/does/not/exist") is None
+        assert world.read_file("/does/not/exist") is None    # exit-code -> None
     finally:
         backend.down(world)

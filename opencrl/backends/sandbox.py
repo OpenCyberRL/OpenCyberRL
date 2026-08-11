@@ -1,4 +1,4 @@
-"""Docker Sandboxes backend. Shells out to the `sbx` CLI — no SDK dependency.
+"""Docker Sandboxes backend. Shells out to the `docker sandbox` CLI — no SDK.
 
 Runs a single-host world inside a Docker Sandbox (a microVM): stronger
 isolation than a shared-kernel container, far less setup than the qemu
@@ -6,17 +6,17 @@ backend. No external egress unless the task sets caps.needs_internet.
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
-
-import yaml
 
 from opencrl.backend import basedir_of, register_backend, resolve_path
 from opencrl.task import Caps
 
+# The Docker Sandboxes CLI is `docker sandbox <command>`.
+_CLI = ["docker", "sandbox"]
 # Cap on any single exec/read_file's returned output (mirrors the docker backend).
 _MAX_OUTPUT = 100_000
 
@@ -35,24 +35,24 @@ def _cap(text: str) -> str:
 class SandboxWorld:
     agent = "sandbox"                # single microVM; the `host` arg is ignored
 
-    def __init__(self, name: str, workdir: str, sbx_bin: str = "sbx",
-                 exec_timeout: float = 120.0):
+    def __init__(self, name: str, workspace: str, exec_timeout: float = 120.0):
         self.name = name
-        self._workdir = workdir      # temp dir holding the kit (removed in down())
-        self.sbx_bin = sbx_bin
+        self._workspace = workspace  # temp workspace dir (removed in down())
         self.exec_timeout = exec_timeout
 
     def exec(self, command: str, host: str | None = None) -> str:
         try:
-            cp = _run([self.sbx_bin, "exec", self.name, "sh", "-c", command],
+            cp = _run([*_CLI, "exec", self.name, "sh", "-c", command],
                       timeout=self.exec_timeout)
         except subprocess.TimeoutExpired:
             return f"[opencrl: command timed out after {self.exec_timeout}s]"
         return _cap((cp.stdout or "") + (cp.stderr or ""))
 
     def read_file(self, path: str, host: str | None = None) -> str | None:
+        # No `docker sandbox cp`, so read via `exec cat`. exec propagates the
+        # inner exit code, so a missing file returns non-zero -> None.
         try:
-            cp = _run([self.sbx_bin, "cp", f"{self.name}:{path}", "-"],
+            cp = _run([*_CLI, "exec", self.name, "cat", "--", path],
                       timeout=self.exec_timeout)
         except subprocess.TimeoutExpired:
             return None
@@ -62,61 +62,62 @@ class SandboxWorld:
 
 
 class Sandbox:
-    def __init__(self, cpus: int = 2, memory: str = "2g", exec_timeout: float = 120.0,
-                 sbx_bin: str = "sbx"):
-        self.cpus = cpus
-        self.memory = memory
+    def __init__(self, agent: str = "codex", exec_timeout: float = 120.0):
+        self.agent = agent          # the create-agent; we exec, never `run` it
         self.exec_timeout = exec_timeout
-        self.sbx_bin = sbx_bin
-
-    def _kit(self, spec: dict, caps: Caps) -> dict:
-        image = spec.get("image")
-        if not image:
-            raise ValueError("opencrl: sandbox world requires 'image'")
-        return {"sandbox": {
-            "image": image,
-            "cpus": spec.get("cpus", self.cpus),
-            "memory": spec.get("memory", self.memory),
-            "network": "allow" if caps.needs_internet else "deny",
-        }}
 
     def up(self, spec: dict, caps: Caps) -> SandboxWorld:
         spec = spec or {}
+        image = spec.get("image")
+        if not image:
+            raise ValueError("opencrl: sandbox world requires 'image'")
         basedir = basedir_of(spec)
-        kit = self._kit(spec, caps)                  # raises on missing image first
         name = f"opencrl-{uuid.uuid4().hex[:8]}"
-        workdir = tempfile.mkdtemp(prefix="opencrl-sbx-")
+        # A throwaway workspace: `docker sandbox create` requires one and mounts
+        # it read-write, so copy the task's `files` into a temp dir rather than
+        # exposing (and letting the guest mutate) the author's own directory.
+        workspace = tempfile.mkdtemp(prefix="opencrl-sbx-")
         try:
-            kit_path = os.path.join(workdir, "kit.yaml")
-            with open(kit_path, "w") as f:
-                yaml.safe_dump(kit, f)
-            argv = [self.sbx_bin, "create", "--name", name, "--kit", kit_path]
             if spec.get("files"):
-                argv.append(resolve_path(spec["files"], basedir, "files"))
-            cp = _run(argv, timeout=None)
-            if cp.returncode != 0:
-                raise RuntimeError(f"sbx create failed:\n{cp.stderr}")
+                shutil.copytree(resolve_path(spec["files"], basedir, "files"),
+                                workspace, dirs_exist_ok=True)
+            create = _run([*_CLI, "create", "--name", name, "--template", image,
+                           self.agent, workspace], timeout=None)
+            if create.returncode != 0:
+                raise RuntimeError(f"docker sandbox create failed:\n{create.stderr}")
+            if not caps.needs_internet:
+                # Deny all egress; the sandbox proxy otherwise defaults to allow.
+                deny = _run([*_CLI, "network", "proxy", name, "--policy", "deny"],
+                            timeout=None)
+                if deny.returncode != 0:
+                    raise RuntimeError(
+                        f"docker sandbox network proxy (deny) failed:\n{deny.stderr}")
             for cmd in spec.get("setup", []):
-                scp = _run([self.sbx_bin, "exec", name, "sh", "-c", cmd], timeout=None)
-                if scp.returncode != 0:
-                    raise RuntimeError(f"sandbox setup failed ({cmd!r}):\n{scp.stderr}")
-            return SandboxWorld(name, workdir, self.sbx_bin, self.exec_timeout)
+                setup = _run([*_CLI, "exec", name, "sh", "-c", cmd], timeout=None)
+                if setup.returncode != 0:
+                    raise RuntimeError(f"sandbox setup failed ({cmd!r}):\n{setup.stderr}")
+            return SandboxWorld(name, workspace, self.exec_timeout)
         except Exception:
-            _teardown(name, workdir, self.sbx_bin)
+            _teardown(name, workspace)
             raise
 
     def down(self, world: SandboxWorld) -> None:
-        _teardown(world.name, world._workdir, world.sbx_bin)
+        _teardown(world.name, world._workspace)
 
 
-def _teardown(name: str, workdir: str, sbx_bin: str) -> None:
+def _teardown(name: str, workspace: str) -> None:
     if name:
         try:
-            _run([sbx_bin, "rm", "--force", name], timeout=None)
+            cp = _run([*_CLI, "rm", name])
         except OSError:
-            pass
-    if workdir:
-        shutil.rmtree(workdir, ignore_errors=True)
+            cp = None
+        if cp is not None and cp.returncode != 0:
+            # A non-zero rm means the microVM may still be running — surface it
+            # rather than reporting a clean teardown.
+            print(f"opencrl: warning: 'docker sandbox rm {name}' failed; the "
+                  f"sandbox may still be running.\n{cp.stderr}", file=sys.stderr)
+    if workspace:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 register_backend("sandbox", lambda: Sandbox())

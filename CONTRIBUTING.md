@@ -162,9 +162,10 @@ access required — not meant to run as-is in CI).
 ## Sandbox backend (microVM isolation)
 
 Use `backend="sandbox"` to run one host inside a Docker Sandbox — a
-microVM — via the `sbx` CLI. Stronger isolation than the docker backend (a
-real VM boundary, not a shared kernel), far less setup than qemu (no
-kernel/initrd to build). Requires the `sbx` CLI installed.
+microVM — via the `docker sandbox` CLI. Stronger isolation than the docker
+backend (a real VM boundary, not a shared kernel), far less setup than qemu
+(no kernel/initrd to build). Requires the Docker Sandboxes plugin
+(`docker sandbox`).
 
 The world spec is not Compose:
 
@@ -175,8 +176,6 @@ files: build/workspace      # optional, local dir mounted as the workspace,
                              # resolved relative to the task directory
 setup:                      # optional, shell commands run once when the
   - "echo CTF{...} > /root/flag.txt"   # world starts
-cpus: 2                      # optional
-memory: 2g                   # optional
 ```
 
 Minimal task:
