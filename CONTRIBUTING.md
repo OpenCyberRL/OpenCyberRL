@@ -159,49 +159,6 @@ Constraints:
 bootable kernel + busybox initramfs from source (Linux build host, network
 access required — not meant to run as-is in CI).
 
-## Sandbox backend (microVM isolation)
-
-Use `backend="sandbox"` to run one host inside a Docker Sandbox — a
-microVM — via the `docker sandbox` CLI. Stronger isolation than the docker
-backend (a real VM boundary, not a shared kernel), far less setup than qemu
-(no kernel/initrd to build). Requires the Docker Sandboxes plugin
-(`docker sandbox`).
-
-The world spec is not Compose:
-
-```yaml
-# tasks/sandboxed/world.yml
-image: ubuntu:24.04         # required
-files: build/workspace      # optional, local dir mounted as the workspace,
-                             # resolved relative to the task directory
-setup:                      # optional, shell commands run once when the
-  - "echo CTF{...} > /root/flag.txt"   # world starts
-```
-
-Minimal task:
-
-```python
-from opencrl import task, Task, shell, flag, Caps
-
-@task
-def sandboxed() -> Task:
-    return Task(
-        world="world.yml",     # image: ubuntu:24.04
-        backend="sandbox",
-        tools=[shell],
-        goal="Read the flag and state it as your final answer.",
-        reward=flag("CTF{...}"),
-        caps=Caps(offensive=True),   # no needs_internet: no egress by default
-    )
-```
-
-The microVM has no external egress unless the task's `caps.needs_internet`
-is set. The Docker Sandbox proxy ships a built-in allowlist (GitHub, PyPI,
-npm, the AI-provider APIs, …) that a plain deny-policy leaves open, so the
-backend blocks every allowlisted domain to airgap the guest. It reads that
-allowlist from the sandbox daemon's config; if it cannot, a no-egress task
-fails closed (errors) rather than running with egress.
-
 ## Conformance: every task ships a reference solution
 
 Every task needs `tasks/mytask/test_task.py` with a `ScriptedModel` that
