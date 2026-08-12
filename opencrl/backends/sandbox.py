@@ -34,20 +34,42 @@ def _cap(text: str) -> str:
     return text
 
 
-# The sandbox proxy keeps a built-in allowlist (github, pypi, npm, the AI-provider
-# APIs, …) that `--policy deny` does NOT drop. To airgap a no-egress world we must
-# block each allowed domain explicitly, reading the daemon's current allowlist so
-# this tracks the installed version rather than a hard-coded snapshot.
-_PROXY_CONFIG = os.path.expanduser("~/.sandboxd/proxy-config.json")
+# `--policy deny` blocks only NON-allowlisted egress. The sandbox proxy's config
+# also carries a built-in allowlist (github, pypi, npm, AI APIs, …) and bypass
+# rules, all of which survive a deny. To airgap a no-egress guest we block every
+# allowlisted domain and refuse to run when bypass rules exist or the config
+# can't be read (fail closed). sandboxd may be pointed at a non-default config
+# via SANDBOXD_PROXY_CONFIG, so honor that path too.
+_DEFAULT_PROXY_CONFIG = os.path.expanduser("~/.sandboxd/proxy-config.json")
 
 
-def _proxy_allowlist() -> "list[str] | None":
-    """Domains the sandbox proxy allows by default, or None if it can't be read."""
+def _proxy_config_path() -> str:
+    return os.environ.get("SANDBOXD_PROXY_CONFIG") or _DEFAULT_PROXY_CONFIG
+
+
+def _egress_block_args() -> list[str]:
+    """`--block-host` args that airgap the guest, from the daemon's proxy config.
+
+    Fail closed (raise) when the config can't be read or carries bypass rules
+    that skip the proxy and can't be blocked — better to error than run with
+    egress a no-egress task expected to be denied.
+    """
+    path = _proxy_config_path()
     try:
-        with open(_PROXY_CONFIG) as f:
-            return json.load(f).get("network", {}).get("allowedDomains", [])
-    except (OSError, ValueError):
-        return None
+        with open(path) as f:
+            net = json.load(f).get("network", {})
+    except (OSError, ValueError) as e:
+        raise RuntimeError(
+            f"opencrl: cannot read the Docker Sandbox proxy config ({path}) to "
+            "enforce no egress. Set caps(needs_internet=True) to allow network, "
+            "or use the docker/qemu backend for a guaranteed airgap.") from e
+    if net.get("bypassDomains") or net.get("bypassCIDRs"):
+        raise RuntimeError(
+            "opencrl: the Docker Sandbox proxy has bypass rules that skip the "
+            "proxy and can't be blocked; a no-egress guest can't be guaranteed. "
+            "Clear the proxy bypass config, set caps(needs_internet=True), or use "
+            "the docker/qemu backend.")
+    return [a for d in net.get("allowedDomains", []) for a in ("--block-host", d)]
 
 
 class SandboxWorld:
@@ -107,16 +129,9 @@ class Sandbox:
             if create.returncode != 0:
                 raise RuntimeError(f"docker sandbox create failed:\n{create.stderr}")
             if not caps.needs_internet:
-                # `--policy deny` only blocks non-allowlisted egress, so also block
-                # every built-in allowlisted domain to actually airgap the guest.
-                allow = _proxy_allowlist()
-                if allow is None:
-                    raise RuntimeError(
-                        "opencrl: cannot read the Docker Sandbox proxy allowlist "
-                        f"({_PROXY_CONFIG}) to enforce no egress. Set "
-                        "caps(needs_internet=True) to allow network, or use the "
-                        "docker/qemu backend for a guaranteed airgap.")
-                block = [a for domain in allow for a in ("--block-host", domain)]
+                # Deny the default policy AND block the proxy's built-in allowlist
+                # (fail closed if it can't be read or has bypass rules).
+                block = _egress_block_args()
                 deny = _run([*_CLI, "network", "proxy", name, "--policy", "deny",
                              *block], timeout=None)
                 if deny.returncode != 0:

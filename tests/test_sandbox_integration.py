@@ -42,12 +42,16 @@ def test_sandbox_boots_and_execs():
 
 @_skip
 def test_sandbox_no_egress_blocks_the_proxy_allowlist():
-    # The default world is airgapped: apt needs the ubuntu mirror, which is on
-    # the sandbox proxy's built-in allowlist — so it must be blocked too.
+    # The default world is airgapped: installing curl needs the ubuntu mirror,
+    # which is on the sandbox proxy's built-in allowlist — so it must be blocked
+    # too. Check curl is actually absent afterward (an unambiguous connectivity
+    # signal), not just apt's exit code.
     backend = Sandbox()
     world = backend.up({"image": "ubuntu:24.04"}, Caps())     # no needs_internet
     try:
-        out = world.exec("apt-get update >/dev/null 2>&1 && echo REACHED || echo BLOCKED")
+        out = world.exec(
+            "apt-get update >/dev/null 2>&1 && apt-get install -y curl >/dev/null 2>&1; "
+            "command -v curl >/dev/null && echo REACHED || echo BLOCKED")
         assert "BLOCKED" in out
     finally:
         backend.down(world)

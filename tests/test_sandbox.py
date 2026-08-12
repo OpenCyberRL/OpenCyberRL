@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 
@@ -28,12 +29,15 @@ class Recorder:
 
 
 @pytest.fixture(autouse=True)
-def _stub_allowlist(monkeypatch):
-    # up() reads the daemon proxy allowlist to block it; stub it so unit tests
-    # never touch ~/.sandboxd. A test can re-monkeypatch to None to exercise
-    # the fail-closed path.
-    monkeypatch.setattr(sbx, "_proxy_allowlist",
-                        lambda: ["github.com:443", "pypi.org:443"])
+def _proxy_config(tmp_path, monkeypatch):
+    # up() reads the daemon proxy config to block its allowlist. Point it at a
+    # temp config via the SANDBOXD_PROXY_CONFIG override so unit tests never
+    # touch the real ~/.sandboxd. A test can re-set the env to exercise the
+    # fail-closed / bypass paths.
+    cfg = tmp_path / "proxy-config.json"
+    cfg.write_text(json.dumps(
+        {"network": {"allowedDomains": ["github.com:443", "pypi.org:443"]}}))
+    monkeypatch.setenv("SANDBOXD_PROXY_CONFIG", str(cfg))
 
 
 # --- SandboxWorld -------------------------------------------------------
@@ -128,11 +132,46 @@ def test_up_denies_egress_and_blocks_the_allowlist_by_default(monkeypatch):
         s.down(w)
 
 
-def test_up_fails_closed_when_allowlist_unreadable(monkeypatch):
+def test_up_fails_closed_when_config_unreadable(monkeypatch, tmp_path):
     monkeypatch.setattr(sbx, "_run", Recorder())
-    monkeypatch.setattr(sbx, "_proxy_allowlist", lambda: None)
+    monkeypatch.setenv("SANDBOXD_PROXY_CONFIG", str(tmp_path / "nope.json"))
     with pytest.raises(RuntimeError, match="cannot read"):
         sbx.Sandbox().up({"image": "x"}, Caps())
+
+
+# --- _egress_block_args (the no-egress airgap logic) --------------------
+
+def _write_proxy_config(path, network):
+    path.write_text(json.dumps({"network": network}))
+
+
+def test_egress_block_args_blocks_the_allowlist(monkeypatch, tmp_path):
+    cfg = tmp_path / "c.json"
+    _write_proxy_config(cfg, {"allowedDomains": ["github.com:443", "pypi.org:443"]})
+    monkeypatch.setenv("SANDBOXD_PROXY_CONFIG", str(cfg))
+    assert sbx._egress_block_args() == [
+        "--block-host", "github.com:443", "--block-host", "pypi.org:443"]
+
+
+def test_egress_block_args_honors_config_override(monkeypatch, tmp_path):
+    cfg = tmp_path / "override.json"
+    _write_proxy_config(cfg, {"allowedDomains": ["only.example:443"]})
+    monkeypatch.setenv("SANDBOXD_PROXY_CONFIG", str(cfg))
+    assert sbx._egress_block_args() == ["--block-host", "only.example:443"]
+
+
+def test_egress_block_args_fails_closed_on_bypass_rules(monkeypatch, tmp_path):
+    cfg = tmp_path / "bypass.json"
+    _write_proxy_config(cfg, {"allowedDomains": [], "bypassDomains": ["evil.example:443"]})
+    monkeypatch.setenv("SANDBOXD_PROXY_CONFIG", str(cfg))
+    with pytest.raises(RuntimeError, match="bypass"):
+        sbx._egress_block_args()
+
+
+def test_egress_block_args_fails_closed_when_unreadable(monkeypatch, tmp_path):
+    monkeypatch.setenv("SANDBOXD_PROXY_CONFIG", str(tmp_path / "missing.json"))
+    with pytest.raises(RuntimeError, match="cannot read"):
+        sbx._egress_block_args()
 
 
 def test_up_allows_egress_with_needs_internet(monkeypatch):
