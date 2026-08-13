@@ -100,3 +100,25 @@ def test_gym_env_scores_staged_reward_as_aggregate_float():
     assert terminated and not truncated
     assert reward == 0.5
     assert isinstance(reward, float)
+
+def test_gym_reset_nulls_world_before_up_so_no_double_teardown():
+    """If up() raises, close() must not call down() on the stale world."""
+    down_count = [0]
+
+    class RecordingBackend(MockBackend):
+        def up(self, spec, caps):
+            if down_count[0] > 0:
+                raise RuntimeError("up failed")
+            return super().up(spec, caps)
+        def down(self, world):
+            down_count[0] += 1
+
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), max_steps=5)
+    env = to_gym(task, backend=RecordingBackend())
+    env.reset()
+    try:
+        env.reset()
+    except RuntimeError:
+        pass
+    env.close()
+    assert down_count[0] == 1
