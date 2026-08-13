@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-dependencies = ["pyyaml>=6.0"]
+dependencies = ["pyyaml>=6.0", "rich>=13.0"]
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
