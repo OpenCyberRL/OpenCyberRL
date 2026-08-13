@@ -1,5 +1,0 @@
-x-opencrl:
-  agent: box
-services:
-  box:
-    build: build
