@@ -5,6 +5,7 @@ import importlib.util
 import inspect
 import sys
 import warnings
+import yaml
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, TYPE_CHECKING

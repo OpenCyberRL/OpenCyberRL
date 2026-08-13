@@ -17,5 +17,15 @@ def test_scripted_model_returns_steps_in_order():
 def test_scripted_model_raises_when_exhausted():
     m = ScriptedModel([{"role": "assistant", "content": "x", "tool_calls": None}])
     m([], [])
-    with pytest.raises(IndexError):
+    with pytest.raises(StopIteration):
         m([], [])
+
+def test_scripted_model_raises_stopiteration_when_exhausted():
+    """Exhausting a ScriptedModel should raise StopIteration with a message,
+    not a bare IndexError."""
+    model = ScriptedModel([
+        {"role": "assistant", "content": "only step", "tool_calls": None},
+    ])
+    model([], [])  # consume the one step
+    with pytest.raises(StopIteration, match="exhausted"):
+        model([], [])  # no more steps

@@ -18,7 +18,10 @@ class ScriptedModel:
         self._i = 0
 
     def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
-        step = self._steps[self._i]   # IndexError when exhausted (intended)
+        if self._i >= len(self._steps):
+            raise StopIteration(
+                f"opencrl: ScriptedModel exhausted after {len(self._steps)} step(s)")
+        step = self._steps[self._i]
         self._i += 1
         return step
 
