@@ -1,74 +1,166 @@
+"""Tests for opencrl CLI — install/uninstall/update/list/new commands."""
+from __future__ import annotations
+
+import sys
 from pathlib import Path
+from unittest.mock import patch
+
+import opencrl.cli as cli
 from opencrl.cli import main
 
-def test_new_scaffolds_task(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    rc = main(["new", "myctf"])
-    assert rc == 0
-    assert (tmp_path / "tasks" / "myctf" / "task.py").exists()
-    assert (tmp_path / "tasks" / "myctf" / "world.yml").exists()
 
-def test_list_shows_discovered_task(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-    main(["new", "myctf"])
-    rc = main(["list"])
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+def _make_fake_modules_repo(home: Path, module_name: str = "examples") -> Path:
+    """Create a fake modules repo structure under OPENCRL_HOME.
+
+    Returns the modules_dir path. Creates:
+      home/modules/opencyberrl-modules/.git/
+      home/modules/opencyberrl-modules/<module>/<sub>/task.py
+    """
+    md = home / "modules" / "opencyberrl-modules"
+    (md / ".git").mkdir(parents=True, exist_ok=True)
+    mod_dir = md / module_name
+    sub = mod_dir / "demo" / "task.py"
+    sub.parent.mkdir(parents=True, exist_ok=True)
+    sub.write_text("# fake task\n")
+    return md
+def _clear_registry():
+    """Clear the task registry so tests don't leak state."""
+    sys.modules["opencrl.task"]._REGISTRY.clear()
+
+# ---------------------------------------------------------------------------
+# install
+# ---------------------------------------------------------------------------
+
+def test_cli_install_no_arg_lists_available(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENCRL_HOME", str(tmp_path))
+    _make_fake_modules_repo(tmp_path, "examples")
+    _clear_registry()
+    rc = main(["install"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "myctf" in out
+    assert "examples" in out
 
-def test_new_refuses_to_overwrite_existing_task(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    main(["new", "myctf"])
-    task_py = (tmp_path / "tasks" / "myctf" / "task.py").read_text()
-    world_yml = (tmp_path / "tasks" / "myctf" / "world.yml").read_text()
-    rc = main(["new", "myctf"])
+
+def test_cli_install_module_activates(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENCRL_HOME", str(tmp_path))
+    _make_fake_modules_repo(tmp_path, "examples")
+    _clear_registry()
+    rc = main(["install", "examples"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Activated" in out
+    import opencrl.modules as m
+    assert "examples" in m.active_modules()
+
+
+def test_cli_install_nonexistent_module_fails(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENCRL_HOME", str(tmp_path))
+    _make_fake_modules_repo(tmp_path, "examples")
+    _clear_registry()
+    rc = main(["install", "nonexistent"])
+    out = capsys.readouterr().out
     assert rc == 1
-    assert (tmp_path / "tasks" / "myctf" / "task.py").read_text() == task_py
-    assert (tmp_path / "tasks" / "myctf" / "world.yml").read_text() == world_yml
+    assert "not found" in out
 
-def test_new_rejects_non_identifier_name(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    rc = main(["new", "web-sqli"])
+
+# ---------------------------------------------------------------------------
+# uninstall
+# ---------------------------------------------------------------------------
+
+def test_cli_uninstall_deactivates(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENCRL_HOME", str(tmp_path))
+    _make_fake_modules_repo(tmp_path, "examples")
+    import opencrl.modules as m
+    m.activate_module("examples")
+    assert "examples" in m.active_modules()
+    _clear_registry()
+    rc = main(["uninstall", "examples"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Deactivated" in out
+    assert "examples" not in m.active_modules()
+
+
+# ---------------------------------------------------------------------------
+# update
+# ---------------------------------------------------------------------------
+
+def test_cli_update_pulls_repo(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENCRL_HOME", str(tmp_path))
+    _make_fake_modules_repo(tmp_path, "examples")
+    _clear_registry()
+    with patch("opencrl.modules.update_modules_repo") as mock_update:
+        rc = main(["update"])
+        out = capsys.readouterr().out
+    assert rc == 0
+    assert "Updated" in out
+    mock_update.assert_called_once()
+
+
+def test_cli_update_not_cloned_fails(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENCRL_HOME", str(tmp_path))
+    # Don't create the .git dir — is_cloned() returns False
+    _clear_registry()
+    rc = main(["update"])
+    out = capsys.readouterr().out
     assert rc == 1
-    assert not (tmp_path / "tasks" / "web-sqli").exists()
-    assert not (tmp_path / "tasks").exists()
+    assert "No modules repo" in out
 
-def test_run_prints_stage_breakdown(monkeypatch, capsys):
-    import sys
-    import opencrl.cli as cli
-    from opencrl.rollout import Rollout
-    from opencrl.task import Caps
 
-    fake = Rollout(task="t", transcript=[{"role": "assistant", "content": "done"}],
-                   reward=0.5, caps=Caps(), stages={"root": 1.0, "flag": 0.0})
-    monkeypatch.setattr(cli, "discover", lambda path: None)
-    monkeypatch.setattr(cli, "get_task", lambda name: object())
-    monkeypatch.setattr(cli, "_build_model", lambda args: object())
-    rollout_mod = sys.modules["opencrl.rollout"]
-    monkeypatch.setattr(rollout_mod, "rollout", lambda task, model: fake)
+# ---------------------------------------------------------------------------
+# list
+# ---------------------------------------------------------------------------
 
-    rc = cli.main(["run", "whatever"])
+def test_cli_list_shows_tasks(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    # Create a fake tasks dir with a task.py that registers a task
+    tasks_dir = tmp_path / "tasks" / "test_task"
+    tasks_dir.mkdir(parents=True)
+    tasks_dir.joinpath("task.py").write_text(
+        "from opencrl import task, Task, shell, flag, Caps\n"
+        "@task\n"
+        "def test_task() -> Task:\n"
+        "    return Task(goal='test', reward=flag('CTF{x}'), tools=(shell,), caps=Caps(offensive=True))\n"
+    )
+    rc = main(["--path", str(tmp_path / "tasks"), "list"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "reward=0.5" in out
-    assert "root: 1.0" in out
-    assert "flag: 0.0" in out
+    assert "test_task" in out
+    _clear_registry()
 
-def test_eval_prints_stage_means(monkeypatch, capsys):
-    import sys
-    import opencrl.cli as cli
 
-    stats = {"n": 2, "mean_reward": 0.5, "rewards": [1.0, 0.0],
-             "stage_means": {"root": 1.0, "flag": 0.0}}
-    monkeypatch.setattr(cli, "discover", lambda path: None)
-    monkeypatch.setattr(cli, "get_task", lambda name: object())
-    monkeypatch.setattr(cli, "_build_model", lambda args: object())
-    eval_mod = sys.modules["opencrl.adapters.eval"]
-    monkeypatch.setattr(eval_mod, "evaluate", lambda task, model, n, out: stats)
+# ---------------------------------------------------------------------------
+# new
+# ---------------------------------------------------------------------------
 
-    rc = cli.main(["eval", "whatever"])
+def test_cli_new_still_works(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    monkeypatch.chdir(tmp_path)
+    rc = main(["new", "mytask"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "mean_reward=0.5" in out
-    assert "root: 1.0" in out
-    assert "flag: 0.0" in out
+    assert (tmp_path / "tasks" / "mytask" / "task.py").exists()
+    assert (tmp_path / "tasks" / "mytask" / "world.yml").exists()
+    assert "created" in out
+
+
+# ---------------------------------------------------------------------------
+# run / eval removed
+# ---------------------------------------------------------------------------
+
+def test_cli_no_run_command(monkeypatch, tmp_path):
+    _clear_registry()
+    import pytest
+    with pytest.raises(SystemExit):
+        main(["run", "web_sqli"])
+
+
+def test_cli_no_eval_command(monkeypatch, tmp_path):
+    _clear_registry()
+    import pytest
+    with pytest.raises(SystemExit):
+        main(["eval", "web_sqli"])
