@@ -3,6 +3,11 @@ from __future__ import annotations
 
 from typing import Protocol
 
+try:
+    from openai import OpenAI
+except ImportError:  # optional extra (`pip install opencrl[openai]`)
+    OpenAI = None  # type: ignore[assignment]
+
 
 class Model(Protocol):
     def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
@@ -30,10 +35,10 @@ class OpenAIModel:
     """Wraps the OpenAI-compatible chat API. Requires the `openai` extra."""
 
     def __init__(self, model: str, base_url: str | None = None,
-                 api_key: str | None = None):
-        from openai import OpenAI
+                 api_key: str | None = None, max_retries: int = 3):
         self.model = model
-        self.client = OpenAI(base_url=base_url, api_key=api_key)
+        self.client = OpenAI(base_url=base_url, api_key=api_key,
+                             max_retries=max_retries)
 
     def __call__(self, messages: list[dict], tools: list[dict]) -> dict:
         resp = self.client.chat.completions.create(

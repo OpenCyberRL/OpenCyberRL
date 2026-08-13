@@ -29,3 +29,36 @@ def test_scripted_model_raises_stopiteration_when_exhausted():
     model([], [])  # consume the one step
     with pytest.raises(StopIteration, match="exhausted"):
         model([], [])  # no more steps
+
+def test_openai_model_passes_max_retries_to_client():
+    """OpenAIModel must wire max_retries into the OpenAI client constructor."""
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import opencrl.models as models
+    original = models.OpenAI
+    models.OpenAI = FakeOpenAI
+    try:
+        models.OpenAIModel("gpt-4o", max_retries=5)
+    finally:
+        models.OpenAI = original
+    assert captured.get("max_retries") == 5
+
+def test_openai_model_defaults_max_retries_to_three():
+    captured = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import opencrl.models as models
+    original = models.OpenAI
+    models.OpenAI = FakeOpenAI
+    try:
+        models.OpenAIModel("gpt-4o")
+    finally:
+        models.OpenAI = original
+    assert captured.get("max_retries") == 3
