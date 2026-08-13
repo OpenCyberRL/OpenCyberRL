@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 tests/fixtures/qemu/bzImage
 tests/fixtures/qemu/rootfs.cpio.gz
+.DS_Store
