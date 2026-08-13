@@ -1,11 +1,48 @@
 # CLI
 
-The `opencrl` command wraps the library. Run it with `uv run opencrl`.
-
-The `run` and `eval` commands build an `OpenAIModel`, so they need the `openai`
-extra and an `OPENAI_API_KEY`.
+The `opencrl` command manages task modules and scaffolds new tasks. Run it
+with `uv run opencrl`.
 
 ## Commands
+
+### `install`: install task modules
+
+```bash
+uv run opencrl install              # clone modules repo, list available modules
+uv run opencrl install examples     # activate a module
+```
+
+With no argument, clones (or updates) the community modules repo and lists
+all available modules. With a module name, activates that module so its tasks
+are discoverable by `opencrl list` and the Python API.
+
+Modules are cloned to `~/.opencrl/modules/opencyberrl-modules/`. The list of
+active modules is stored in `~/.opencrl/active`.
+
+### `uninstall`: deactivate a module
+
+```bash
+uv run opencrl uninstall examples
+```
+
+Removes the module from the active list. The cloned repo stays on disk.
+
+### `update`: pull latest modules
+
+```bash
+uv run opencrl update
+```
+
+Runs `git pull` on the modules repo to fetch new tasks and updates.
+
+### `list`: list available tasks
+
+```bash
+uv run opencrl list
+```
+
+Discovers and lists all tasks from active modules and local `tasks/`
+directory. Shows each task's name and capabilities.
 
 ### `new`: scaffold a task
 
@@ -13,41 +50,26 @@ extra and an `OPENAI_API_KEY`.
 uv run opencrl new mytask
 ```
 
-Creates `tasks/mytask/task.py` and `tasks/mytask/world.yml`. It refuses to
-overwrite an existing task.
-
-### `list`: list tasks
-
-```bash
-uv run opencrl list
-```
-
-Prints each discovered task with its capabilities.
-
-### `run`: run one rollout
-
-```bash
-uv run opencrl run mytask --model gpt-4o-mini
-```
-
-Runs one episode and prints the transcript, the reward, and the per-stage
-breakdown for a staged reward.
-
-### `eval`: run many rollouts
-
-```bash
-uv run opencrl eval mytask -n 16 --out rollouts.jsonl
-```
-
-Runs the task `n` times, writes one `Rollout` per line to the JSONL file, and
-prints the mean reward.
+Creates `tasks/mytask/task.py` and `tasks/mytask/world.yml` in the local
+`tasks/` directory. Refuses to overwrite an existing task.
 
 ## Options
 
 | Option | Commands | Meaning |
 |---|---|---|
-| `--path` | all | The tasks directory. Defaults to `tasks`. Give it before the command: `opencrl --path mytasks list`. |
-| `--model` | `run`, `eval` | The model name. Defaults to `gpt-4o-mini`. |
-| `--base-url` | `run`, `eval` | The base URL of an OpenAI-compatible server. |
-| `-n` | `eval` | The number of runs. Defaults to 8. |
-| `--out` | `eval` | The JSONL output path. Defaults to `rollouts.jsonl`. |
+| `--path` | `list` | Override task discovery path. Defaults to auto-discover (local `tasks/` + active modules). |
+
+## Running tasks
+
+The CLI handles discovery and module management. To run a task, use the
+Python API:
+
+```python
+from opencrl import discover, get_task, rollout, OpenAIModel
+
+discover()
+r = rollout(get_task("web_sqli"), OpenAIModel("gpt-4o-mini"))
+print(r.reward)
+```
+
+See [Run and evaluate](guide-run-eval.md) for batch evaluation and JSONL output.

@@ -1,5 +1,17 @@
 # Run and evaluate
 
+Tasks are discovered via `discover()`, which searches local `tasks/` and
+installed community modules. Call it before `get_task()`:
+
+```python
+from opencrl import discover, get_task
+
+discover()                    # auto-discover from local + active modules
+task = get_task("web_sqli")   # find by name
+```
+
+See [CLI](cli.md) for installing community task modules with `opencrl install`.
+
 ## One rollout
 
 `rollout()` runs one episode:

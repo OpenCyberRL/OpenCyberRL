@@ -52,19 +52,25 @@ uv run python hello.py
 gives a final answer, scores that answer, and stops the world. The score is
 `1.0` when the answer contains `CTF{hi}`.
 
-## Scaffold a task from the CLI
+## Install community tasks
 
-The CLI writes a task file and a world file for you:
+Tasks live in a separate community repo. Install a module:
 
 ```bash
-uv run opencrl new mytask
+uv run opencrl install examples
+uv run opencrl list
 ```
 
-This creates `tasks/mytask/task.py` and `tasks/mytask/world.yml`. Edit the
-goal, the reward, and the world, then run it:
+## Run a task via Python
 
-```bash
-uv run opencrl run mytask --model gpt-4o-mini
+The CLI handles task discovery. To run a task, use the Python API:
+
+```python
+from opencrl import discover, get_task, rollout, OpenAIModel
+
+discover()
+r = rollout(get_task("web_sqli"), OpenAIModel("gpt-4o-mini"))
+print(r.reward, r.transcript[-1])
 ```
 
 ## Next steps
@@ -72,3 +78,4 @@ uv run opencrl run mytask --model gpt-4o-mini
 - [Write a task](guide-task.md): every field, explained.
 - [Rewards and scoring](guide-rewards.md): from a single flag to staged rewards.
 - [Run and evaluate](guide-run-eval.md): batch runs and JSONL output.
+- [CLI](cli.md): module management commands.

@@ -8,6 +8,10 @@ a **verifier**, a plain function that scores the result. The framework runs the
 agent loop and returns one standard `Rollout` record. You score the record, log
 it, or feed it to a reinforcement-learning pipeline.
 
+Community-contributed tasks live in a separate
+[modules repo](https://github.com/OpenCyberRL/opencyberrl-modules). Install
+them with `opencrl install`.
+
 ## The model
 
 A **task** has four parts:
@@ -24,6 +28,7 @@ answer. Every run produces the same `Rollout` artifact.
 ## Where to start
 
 - New here? Read [Install](install.md), then [Quickstart](quickstart.md).
+- Looking for tasks? Read [Install](install.md) and run `opencrl install`.
 - Writing a task? Read [Write a task](guide-task.md) and [Rewards and scoring](guide-rewards.md).
 - Evaluating agents? Read [Run and evaluate](guide-run-eval.md) and [The Gym adapter](guide-gym.md).
 - Training with RL? Read [RL training adapters](guide-rl-adapters.md).

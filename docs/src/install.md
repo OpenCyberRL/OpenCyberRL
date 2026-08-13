@@ -13,7 +13,7 @@ cd OpenCyberRL
 uv sync
 ```
 
-`uv sync` installs the package and its one runtime dependency, PyYAML.
+`uv sync` installs the package, PyYAML, and rich.
 
 ## Optional extras
 
@@ -21,7 +21,7 @@ Four features live behind optional extras:
 
 | Extra | Adds | Needed for |
 |---|---|---|
-| `openai` | the `openai` client | `OpenAIModel`, and the `run` and `eval` CLI commands |
+| `openai` | the `openai` client | `OpenAIModel` (for `rollout` and `evaluate` in Python) |
 | `gym` | `gymnasium` | the Gym adapter, `to_gym()` |
 | `trl` | `trl` | TRL on-policy GRPO adapter, `to_trl()` |
 | `verl` | `verl`, `pandas` | Verl on-policy adapter, `to_verl()` |
@@ -47,3 +47,16 @@ QEMU:
 ```bash
 uv run pytest
 ```
+
+## Install task modules
+
+Tasks live in a separate community repo. Install them with the CLI:
+
+```bash
+opencrl install              # clone the modules repo and list available modules
+opencrl install examples     # activate the examples module
+opencrl list                 # list all available tasks
+```
+
+Modules are cloned to `~/.opencrl/modules/`. See [Run and evaluate](guide-run-eval.md)
+for running tasks programmatically via the Python API.
