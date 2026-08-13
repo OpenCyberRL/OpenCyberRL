@@ -6,8 +6,8 @@ A plug-and-play framework for authoring sandboxed cybersecurity RL tasks —
 for training and evaluating LLM tool-calling agents. Task authors bring the
 environment (a Docker Compose world) and the verifier (a plain function); the
 framework runs the agent loop and emits one standard `Rollout` artifact you
-can score, log, or feed into RL. Three reference tasks ship under `tasks/` as
-worked examples.
+can score, log, or feed into RL. Community-contributed tasks live in the
+[opencyberrl-modules](https://github.com/OpenCyberRL/opencyberrl-modules) repo.
 
 ## Install
 
@@ -15,10 +15,19 @@ worked examples.
 uv sync
 ```
 
-For the OpenAI-compatible model client and the Gymnasium adapter:
+For the OpenAI-compatible model client, the Gymnasium adapter, and RL
+training adapters:
 
 ```bash
-uv sync --extra openai --extra gym
+uv sync --extra openai --extra gym --extra trl --extra verl
+```
+
+Install community task modules:
+
+```bash
+opencrl install              # clone modules repo, list available modules
+opencrl install examples     # activate the examples module
+opencrl list                 # list installed tasks
 ```
 
 ## 30-second quickstart
@@ -63,15 +72,20 @@ down — win or lose.
 ## CLI
 
 ```bash
-opencrl new <name>                          # scaffold tasks/<name>/{task.py,world.yml}
-opencrl list                                 # list discovered tasks and their caps
-opencrl run <name> --model gpt-4o-mini       # run one rollout, print the transcript + reward
-opencrl eval <name> -n 16 --out rollouts.jsonl   # run N rollouts, write Rollout JSONL, report mean reward
+opencrl install              # clone modules repo, list available modules
+opencrl install <module>     # activate a module
+opencrl uninstall <module>   # deactivate a module
+opencrl update               # pull latest modules
+opencrl list                 # list discovered tasks and their caps
+opencrl new <name>           # scaffold tasks/<name>/{task.py,world.yml}
 ```
+
+Task execution is via the Python API (`rollout()`, `evaluate()`). See
+[Run and evaluate](https://github.com/OpenCyberRL/OpenCyberRL/blob/main/docs/src/guide-run-eval.md).
 
 ## The `Rollout` artifact
 
-Every rollout — from the CLI, `rollout()`, or `evaluate()` — produces the
+Every rollout — from `rollout()` or `evaluate()` — produces the
 same JSON-serializable shape (`Rollout.to_dict()`):
 
 ```json
@@ -89,7 +103,7 @@ same JSON-serializable shape (`Rollout.to_dict()`):
 }
 ```
 
-`opencrl eval` writes one of these per line to a JSONL file, ready for
+`evaluate()` writes one of these per line to a JSONL file, ready for
 downstream scoring pipelines or RL training.
 
 ## Safety
@@ -105,8 +119,8 @@ target on another, reachable only through a web host that bridges both.
 
 What it doesn't enforce: a task's `world.yml` can use `image:` or `build:`
 freely — the framework runs whatever the world spec declares (the quickstart
-above pulls a stock `alpine` image). The three bundled reference tasks build
-their vulnerable targets from source under `build/` by convention, so no
+above pulls a stock `alpine` image). The example tasks in the modules repo
+build their vulnerable targets from source under `build/` by convention, so no
 prebuilt exploit images get pulled, but that's a choice those tasks make,
 not something `opencrl` checks.
 
@@ -117,10 +131,13 @@ assumes `world.yml` doesn't set `network_mode: host`, `privileged: true`, or
 mount the Docker socket (`/var/run/docker.sock`) into a service — `opencrl`
 doesn't currently inspect a world spec for any of those.
 
-## Reference tasks
+## Community tasks
 
-`tasks/web_sqli`, `tasks/privesc`, and `tasks/lateral` are complete,
-passing examples — see [CONTRIBUTING.md](CONTRIBUTING.md) to write your own.
+Tasks live in the
+[opencyberrl-modules](https://github.com/OpenCyberRL/opencyberrl-modules)
+repo. The `examples` module includes `web_sqli`, `privesc`, and `lateral` —
+complete, passing examples. See
+[CONTRIBUTING.md](CONTRIBUTING.md) to write your own.
 
 ## License
 
