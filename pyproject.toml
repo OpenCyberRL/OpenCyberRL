@@ -6,7 +6,31 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
+authors = [
+    { name = "Sarthak Munshi", email = "sarthakmunshi@gmail.com" },
+]
+keywords = ["cybersecurity", "reinforcement-learning", "rl", "llm", "agent", "ctf", "sandbox", "evaluation", "training"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Security",
+]
 dependencies = ["pyyaml>=6.0", "rich>=13.0"]
+
+[project.urls]
+Homepage = "https://github.com/OpenCyberRL/OpenCyberRL"
+Documentation = "https://github.com/OpenCyberRL/OpenCyberRL/tree/main/docs/src"
+Repository = "https://github.com/OpenCyberRL/OpenCyberRL"
+Issues = "https://github.com/OpenCyberRL/OpenCyberRL/issues"
+Changelog = "https://github.com/OpenCyberRL/OpenCyberRL/releases"
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
@@ -23,6 +47,18 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["opencrl"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "tests/",
+    "docs/",
+    "_docs/",
+    ".github/",
+    ".superpowers/",
+    ".claude/",
+    ".ruff_cache/",
+    ".pytest_cache/",
+]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not docker and not qemu' --import-mode=importlib"
