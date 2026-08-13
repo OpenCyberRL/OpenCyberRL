@@ -35,6 +35,16 @@ uv run opencrl update
 
 Runs `git pull` on the modules repo to fetch new tasks and updates.
 
+### `info`: show task details
+
+```bash
+uv run opencrl info web_sqli
+```
+
+Shows the task's goal, backend, tools, capabilities, max steps, and world
+spec in a detailed panel.
+Runs `git pull` on the modules repo to fetch new tasks and updates.
+
 ### `list`: list available tasks
 
 ```bash

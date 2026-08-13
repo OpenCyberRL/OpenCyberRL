@@ -145,7 +145,7 @@ def test_cli_new_still_works(monkeypatch, tmp_path, capsys):
     assert rc == 0
     assert (tmp_path / "tasks" / "mytask" / "task.py").exists()
     assert (tmp_path / "tasks" / "mytask" / "world.yml").exists()
-    assert "created" in out
+    assert "Created" in out
 
 
 # ---------------------------------------------------------------------------
@@ -164,3 +164,63 @@ def test_cli_no_eval_command(monkeypatch, tmp_path):
     import pytest
     with pytest.raises(SystemExit):
         main(["eval", "web_sqli"])
+
+
+# ---------------------------------------------------------------------------
+# info
+# ---------------------------------------------------------------------------
+
+def test_cli_info_shows_task_details(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    tasks_dir = tmp_path / "tasks" / "test_task"
+    tasks_dir.mkdir(parents=True)
+    tasks_dir.joinpath("task.py").write_text(
+        "from opencrl import task, Task, shell, flag, Caps\n"
+        "@task\n"
+        "def test_task() -> Task:\n"
+        "    return Task(goal='Read the flag and report it.', "
+        "reward=flag('CTF{x}'), tools=(shell,), caps=Caps(offensive=True), "
+        "max_steps=10)\n"
+    )
+    rc = main(["--path", str(tmp_path / "tasks"), "info", "test_task"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "test_task" in out
+    assert "Read the flag" in out
+    assert "offensive" in out.lower() or "Offensive" in out
+    _clear_registry()
+
+
+def test_cli_info_nonexistent_task_fails(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    rc = main(["info", "nonexistent"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "not found" in out
+    _clear_registry()
+
+
+# ---------------------------------------------------------------------------
+# uninstall validation
+# ---------------------------------------------------------------------------
+
+def test_cli_uninstall_non_active_fails(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("OPENCRL_HOME", str(tmp_path))
+    _clear_registry()
+    rc = main(["uninstall", "nonactive"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "not active" in out
+
+
+# ---------------------------------------------------------------------------
+# version
+# ---------------------------------------------------------------------------
+
+def test_cli_version_flag(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    rc = main(["--version"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "opencrl" in out
+    _clear_registry()
