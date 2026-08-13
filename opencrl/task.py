@@ -69,9 +69,29 @@ def list_tasks() -> list[str]:
     return sorted(_REGISTRY)
 
 
-def discover(path="tasks") -> None:
-    """Import every tasks/<name>/task.py so their @task decorators register."""
-    root = Path(path)
+def discover(path=None) -> None:
+    """Import task modules so their @task decorators register.
+
+    With path=None, searches both local ./tasks/ and active modules
+    from ~/.opencrl/modules/opencyberrl-modules/<active>/*/.
+    With an explicit path, searches only that directory.
+    """
+    if path is not None:
+        _discover_dir(Path(path))
+        return
+
+    # Local tasks
+    local = Path("tasks")
+    if local.exists():
+        _discover_dir(local)
+
+    # Active modules
+    from opencrl.modules import active_module_paths
+    for mod_path in active_module_paths():
+        _discover_dir(mod_path)
+
+
+def _discover_dir(root: Path) -> None:
     for task_py in sorted(root.glob("*/task.py")):
         spec = importlib.util.spec_from_file_location(
             f"opencrl_tasks.{task_py.parent.name}", task_py
