@@ -94,3 +94,65 @@ def test_rollout_scalar_reward_has_no_stages():
     r = rollout(make_task(), solved_model(), backend=backend)   # existing scalar task
     assert r.stages is None
     assert r.to_dict()["stages"] is None
+
+
+def test_rollout_survives_unknown_tool_name():
+    """A model that hallucinates a tool name should not crash the rollout."""
+    backend = MockBackend(exec_map={})
+    model = ScriptedModel([
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "a", "type": "function",
+                         "function": {"name": "nonexistent",
+                                      "arguments": "{}"}}]},
+        {"role": "assistant", "content": "I tried but failed", "tool_calls": None},
+    ])
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), max_steps=5)
+    r = rollout(task, model, backend=backend)
+    assert r.reward == 0.0
+    # The error string should appear in the tool result message
+    tool_msgs = [m for m in r.transcript if m["role"] == "tool"]
+    assert len(tool_msgs) == 1
+    assert "tool call failed" in tool_msgs[0]["content"]
+
+
+def test_rollout_survives_malformed_json_args():
+    """A model that sends invalid JSON arguments should not crash the rollout."""
+    backend = MockBackend(exec_map={})
+    model = ScriptedModel([
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "a", "type": "function",
+                         "function": {"name": "shell",
+                                      "arguments": "{not valid json"}}]},
+        {"role": "assistant", "content": "I tried but failed", "tool_calls": None},
+    ])
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), max_steps=5)
+    r = rollout(task, model, backend=backend)
+    assert r.reward == 0.0
+    tool_msgs = [m for m in r.transcript if m["role"] == "tool"]
+    assert "tool call failed" in tool_msgs[0]["content"]
+
+
+def test_rollout_survives_tool_run_exception():
+    """A backend that raises during exec should not crash the rollout."""
+    class ExplodingBackend(MockBackend):
+        def up(self, spec, caps):
+            class W:
+                agent = "agent"
+                def exec(self, command, host=None):
+                    raise RuntimeError("kaboom")
+                def read_file(self, path, host=None):
+                    return None
+            return W()
+    backend = ExplodingBackend()
+    model = ScriptedModel([
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "a", "type": "function",
+                         "function": {"name": "shell",
+                                      "arguments": json.dumps({"command": "id"})}}]},
+        {"role": "assistant", "content": "I tried but failed", "tool_calls": None},
+    ])
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), max_steps=5)
+    r = rollout(task, model, backend=backend)
+    assert r.reward == 0.0
+    tool_msgs = [m for m in r.transcript if m["role"] == "tool"]
+    assert "kaboom" in tool_msgs[0]["content"]

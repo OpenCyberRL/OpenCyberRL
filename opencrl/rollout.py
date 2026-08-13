@@ -52,12 +52,15 @@ class Episode:
     def run_tool_calls(self, tool_calls: list[dict]) -> list[dict]:
         results = []
         for call in tool_calls:
-            fn = call["function"]
-            tool = self.tools[fn["name"]]
-            args = json.loads(fn.get("arguments") or "{}")
-            output = tool.run(self.world, **args)
+            try:
+                fn = call["function"]
+                tool = self.tools[fn["name"]]
+                args = json.loads(fn.get("arguments") or "{}")
+                output = tool.run(self.world, **args)
+            except Exception as e:
+                output = f"[opencrl: tool call failed: {e}]"
             results.append(
-                {"role": "tool", "tool_call_id": call["id"], "content": output}
+                {"role": "tool", "tool_call_id": call.get("id", ""), "content": output}
             )
         return results
 
