@@ -45,3 +45,46 @@ def test_evaluate_scalar_task_has_empty_stage_means(tmp_path):
     stats = evaluate(make_task(), model, n=2, out=str(tmp_path / "l.jsonl"),
                      backend=MockBackend())
     assert stats["stage_means"] == {}
+
+def test_evaluate_flushes_each_rollout_before_exception(tmp_path):
+    """If the model raises mid-eval, already-completed rollouts must be on disk."""
+    out = tmp_path / "log.jsonl"
+    call_count = [0]
+
+    def flaky_model(m, t):
+        call_count[0] += 1
+        if call_count[0] == 2:
+            raise RuntimeError("model crashed")
+        return {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+
+    try:
+        evaluate(make_task(), flaky_model, n=3, out=str(out), backend=MockBackend())
+    except RuntimeError:
+        pass  # expected
+
+    # The first rollout must have been flushed before the crash
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["reward"] == 1.0
+
+def test_evaluate_flushes_each_rollout_to_disk_during_eval(tmp_path):
+    """Each completed rollout must reach disk immediately, not only at close.
+
+    The 2nd model call inspects the output file: rollout 1 must already be
+    on disk at that point (proving per-rollout flush, not just close-flush).
+    """
+    out = tmp_path / "log.jsonl"
+    call_count = [0]
+    seen_during_call_2 = [None]
+
+    def inspect_model(m, t):
+        call_count[0] += 1
+        if call_count[0] == 2 and out.exists():
+            seen_during_call_2[0] = out.read_text().strip().splitlines()
+        return {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+
+    evaluate(make_task(), inspect_model, n=2, out=str(out), backend=MockBackend())
+
+    assert seen_during_call_2[0] is not None, "output file did not exist during 2nd rollout"
+    assert len(seen_during_call_2[0]) == 1
+    assert json.loads(seen_during_call_2[0][0])["reward"] == 1.0

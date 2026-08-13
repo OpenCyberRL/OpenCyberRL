@@ -23,6 +23,7 @@ def evaluate(task: Task, model, n: int = 1, out: str | None = None,
                 stage_counts[name] += 1
             if handle:
                 handle.write(json.dumps(r.to_dict()) + "\n")
+                handle.flush()
     finally:
         if handle:
             handle.close()
