@@ -53,3 +53,18 @@ def test_discover_registers_module_using_future_annotations_dataclass(tmp_path):
     discover(tmp_path)
 
     assert "future_annotations_dataclass_demo" in list_tasks()
+
+import warnings
+import pytest
+from opencrl.task import task, Task
+
+def test_duplicate_task_registration_warns():
+    """Registering two tasks with the same name should emit a warning."""
+    @task(name="dup_warn_test")
+    def first() -> Task:
+        return Task(goal="g", reward=lambda s: 0.0)
+
+    with pytest.warns(UserWarning, match="re-registered"):
+        @task(name="dup_warn_test")
+        def second() -> Task:
+            return Task(goal="g2", reward=lambda s: 0.0)

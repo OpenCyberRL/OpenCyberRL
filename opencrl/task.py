@@ -4,7 +4,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import sys
-import yaml
+import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, TYPE_CHECKING
@@ -45,6 +45,9 @@ def task(fn=None, *, name=None):
     def wrap(factory):
         task_name = name or factory.__name__
         src_dir = str(Path(inspect.getfile(factory)).resolve().parent)
+        if task_name in _REGISTRY:
+            warnings.warn(f"opencrl: task {task_name!r} re-registered "
+                          f"(overwrites prior registration)", stacklevel=2)
 
         def build() -> Task:
             return replace(factory(), name=task_name, dir=src_dir)
