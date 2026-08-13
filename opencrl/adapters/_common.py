@@ -30,6 +30,15 @@ def _extract_completion(transcript: list[dict]) -> list[dict]:
     """Extract assistant + tool messages from a transcript (skip system/user)."""
     return [m for m in transcript if m["role"] not in ("system", "user")]
 
+def _extract_assistant_only(transcript: list[dict]) -> list[dict]:
+    """Extract only assistant messages from a transcript (for DPO completions).
+
+    DPO trains the model to generate the chosen response, so completions
+    should contain only model-generated (assistant) messages, not tool
+    results (which are environment-generated).
+    """
+    return [m for m in transcript if m["role"] == "assistant"]
+
 
 def _extract_answer(transcript: list[dict]) -> str:
     """Extract the agent's final answer (last assistant content)."""

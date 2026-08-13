@@ -71,3 +71,25 @@ def test_extract_completion():
     assert "tool" in roles
     assert "system" not in roles
     assert "user" not in roles
+
+
+def test_extract_assistant_only():
+    transcript = [
+        {"role": "system", "content": "You are a security agent..."},
+        {"role": "user", "content": "read the flag"},
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "1", "type": "function",
+                         "function": {"name": "shell",
+                                      "arguments": '{"command": "cat /flag"}'}}]},
+        {"role": "tool", "tool_call_id": "1", "content": "CTF{win}"},
+        {"role": "assistant", "content": "The flag is CTF{win}", "tool_calls": None},
+    ]
+    from opencrl.adapters._common import _extract_assistant_only
+    completion = _extract_assistant_only(transcript)
+    assert isinstance(completion, list)
+    roles = [m["role"] for m in completion]
+    assert all(r == "assistant" for r in roles)
+    assert "tool" not in roles
+    assert "system" not in roles
+    assert "user" not in roles
+    assert len(completion) == 2  # two assistant messages

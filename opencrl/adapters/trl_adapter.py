@@ -26,27 +26,40 @@ def to_trl(task: Task, backend=None):
     resolved_backend = resolve_backend(backend or task.backend)
 
     class OpenCRLREnvironment:
-        """TRL environment backed by an OpenCyberRL sandboxed world."""
+        """TRL environment backed by an OpenCyberRL sandboxed world.
+
+        Public methods (shell, read_file) are exposed to the model as tools
+        by TRL's environment_factory. Prefixed methods (_close) are not.
+        """
 
         def __init__(self):
             self._world = None
             self._episode = None
 
-        def reset(self):
+        def reset(self, **kwargs):
             """Stand up a fresh world and return the task goal as the prompt."""
             self._world = resolved_backend.up(load_world(task), task.caps)
             self._episode = Episode(task, self._world)
             self._episode.start()
             return task.goal
 
+        def shell(self, command: str) -> str:
+            """Run a shell command on your host and return its output."""
+            return self._world.exec(command)
+
+        def read_file(self, path: str) -> str:
+            """Read a file's contents, or empty string if it doesn't exist."""
+            result = self._world.read_file(path)
+            return result if result is not None else ""
+
         def get_reward(self):
-            """Score the completed episode. Must be called before close()."""
+            """Score the completed episode. Must be called before _close()."""
             answer = _extract_answer(self._episode.transcript)
             reward, _ = _score_with_stages(task, self._episode.state(answer))
             return reward
 
-        def close(self):
-            """Tear down the sandbox world."""
+        def _close(self):
+            """Tear down the sandbox world. Prefixed so TRL doesn't expose it as a tool."""
             if self._world is not None:
                 resolved_backend.down(self._world)
                 self._world = None
@@ -59,10 +72,13 @@ def to_trl(task: Task, backend=None):
         results = []
         log_extra = kwargs.get("log_extra", None)
         for prompt, completion in zip(prompts, completions):
-            transcript = [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
+            if isinstance(prompt, list):
+                transcript = list(prompt)
+            else:
+                transcript = [
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ]
             if isinstance(completion, list):
                 transcript.extend(completion)
             else:

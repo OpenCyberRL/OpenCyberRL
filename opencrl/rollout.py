@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
+from opencrl.adapters._common import _SYSTEM_PROMPT
 from opencrl.backend import resolve_backend
 from opencrl.reward import resolve_reward
 from opencrl.state import State
@@ -39,10 +40,7 @@ class Episode:
         self.transcript: list[dict] = []
 
     def start(self) -> list[dict]:
-        system = (
-            "You are a security agent working inside an isolated sandbox. "
-            "Use the tools to accomplish the goal, then state your final answer."
-        )
+        system = _SYSTEM_PROMPT
         self.transcript = [
             {"role": "system", "content": system},
             {"role": "user", "content": self.task.goal},

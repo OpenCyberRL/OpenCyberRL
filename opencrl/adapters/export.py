@@ -1,7 +1,7 @@
 """Offline export: convert OpenCyberRL Rollouts to HuggingFace Datasets."""
 from __future__ import annotations
 
-from opencrl.adapters._common import _extract_prompt, _extract_completion
+from opencrl.adapters._common import _extract_prompt, _extract_completion, _extract_assistant_only
 from opencrl.rollout import Rollout, rollout
 from opencrl.task import Task
 
@@ -26,16 +26,23 @@ def export_rollouts(task: Task, model, n: int = 16, backend=None,
 
 
 def _to_dpo(task: Task, rollouts: list[Rollout]):
-    """Pair high-reward rollouts (chosen) with low-reward (rejected)."""
+    """Pair high-reward rollouts (chosen) with low-reward (rejected).
+
+    Pairs highest with lowest for maximum preference contrast.
+    Filters out pairs where both rollouts have equal reward.
+    """
     from datasets import Dataset
     ranked = sorted(rollouts, key=lambda r: r.reward, reverse=True)
     pairs = []
-    for i in range(0, len(ranked) - 1, 2):
-        chosen_r, rejected_r = ranked[i], ranked[i + 1]
+    for i in range(len(ranked) // 2):
+        chosen_r = ranked[i]
+        rejected_r = ranked[-(i + 1)]
+        if chosen_r.reward == rejected_r.reward:
+            continue  # skip equal-reward pairs (no preference signal)
         pairs.append({
             "prompt": _extract_prompt(task),
-            "chosen": _extract_completion(chosen_r.transcript),
-            "rejected": _extract_completion(rejected_r.transcript),
+            "chosen": _extract_assistant_only(chosen_r.transcript),
+            "rejected": _extract_assistant_only(rejected_r.transcript),
         })
     return Dataset.from_list(pairs)
 

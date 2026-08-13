@@ -99,7 +99,10 @@ def test_export_dpo_with_staged_reward_uses_aggregate():
     from opencrl.adapters.export import _to_dpo
     ds = _to_dpo(staged, rollouts)
     assert len(ds) == 1
-    assert "uid=0" in str(ds[0]["chosen"])
+    # full model (reward=1.0) is chosen; its assistant messages contain CTF{x}
+    assert "CTF{x}" in str(ds[0]["chosen"])
+    # tool messages are excluded from DPO completions (assistant-only)
+    assert "uid=0" not in str(ds[0]["chosen"])
 
 
 def test_export_rollouts_runs_n_rollouts():
@@ -121,3 +124,44 @@ def test_export_invalid_fmt_raises():
             n=1, backend=MockBackend(),
             fmt="invalid",
         )
+
+
+def test_export_dpo_max_contrast_pairing():
+    """DPO should pair highest-reward with lowest-reward for maximum contrast."""
+    from opencrl.rollout import rollout
+    rollouts = [
+        rollout(make_task(), _solved_model(), backend=MockBackend(exec_map={"cat /flag": "CTF{win}"})),
+        rollout(make_task(), _failed_model(), backend=MockBackend(exec_map={"cat /flag": "nope"})),
+    ]
+    from opencrl.adapters.export import _to_dpo
+    ds = _to_dpo(make_task(), rollouts)
+    assert len(ds) == 1
+    # reward 1.0 (solved) is chosen, reward 0.0 (failed) is rejected
+    assert "CTF{win}" in str(ds[0]["chosen"])
+    assert "couldn't find it" in str(ds[0]["rejected"])
+
+
+def test_export_dpo_skips_equal_reward_pairs():
+    """DPO should skip pairs where both rollouts have equal reward (no signal)."""
+    from opencrl.rollout import rollout
+    rollouts = [
+        rollout(make_task(), _failed_model(), backend=MockBackend(exec_map={"cat /flag": "nope"})),
+        rollout(make_task(), _failed_model(), backend=MockBackend(exec_map={"cat /flag": "nope"})),
+    ]
+    from opencrl.adapters.export import _to_dpo
+    ds = _to_dpo(make_task(), rollouts)
+    assert len(ds) == 0
+
+
+def test_export_dpo_completion_is_assistant_only():
+    """DPO chosen/rejected should contain only assistant messages, not tool messages."""
+    from opencrl.rollout import rollout
+    rollouts = [
+        rollout(make_task(), _solved_model(), backend=MockBackend(exec_map={"cat /flag": "CTF{win}"})),
+        rollout(make_task(), _failed_model(), backend=MockBackend(exec_map={"cat /flag": "nope"})),
+    ]
+    from opencrl.adapters.export import _to_dpo
+    ds = _to_dpo(make_task(), rollouts)
+    chosen = ds[0]["chosen"]
+    for msg in chosen:
+        assert msg["role"] == "assistant"
