@@ -84,3 +84,24 @@ model = ScriptedModel([
     {"role": "assistant", "content": "The flag is CTF{win}", "tool_calls": None},
 ])
 ```
+
+## Export rollouts for offline training
+
+`export_rollouts()` runs `n` rollouts and packages them as a HuggingFace
+`Dataset` for offline preference fine-tuning. It supports three formats:
+
+```python
+from opencrl import export_rollouts, OpenAIModel
+
+# DPO preference pairs: highest-reward vs lowest-reward
+ds = export_rollouts(task, OpenAIModel("gpt-4o-mini"), n=16, fmt="dpo")
+
+# SFT: only successful trajectories (reward >= 1.0)
+ds = export_rollouts(task, OpenAIModel("gpt-4o-mini"), n=16, fmt="sft")
+
+# KTO: unpaired, each rollout labeled good/bad
+ds = export_rollouts(task, OpenAIModel("gpt-4o-mini"), n=16, fmt="kto")
+```
+
+For on-policy training with TRL or Verl, see
+[RL training adapters](guide-rl-adapters.md).

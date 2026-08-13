@@ -17,17 +17,18 @@ uv sync
 
 ## Optional extras
 
-Two features live behind optional extras:
+Four features live behind optional extras:
 
 | Extra | Adds | Needed for |
 |---|---|---|
 | `openai` | the `openai` client | `OpenAIModel`, and the `run` and `eval` CLI commands |
 | `gym` | `gymnasium` | the Gym adapter, `to_gym()` |
+| `trl` | `trl` | TRL on-policy GRPO adapter, `to_trl()` |
+| `verl` | `verl`, `pandas` | Verl on-policy adapter, `to_verl()` |
 
-Install one or both:
+Install any combination:
 
-```bash
-uv sync --extra openai --extra gym
+uv sync --extra openai --extra gym --extra trl --extra verl
 ```
 
 ## Backend requirements

@@ -26,6 +26,7 @@ answer. Every run produces the same `Rollout` artifact.
 - New here? Read [Install](install.md), then [Quickstart](quickstart.md).
 - Writing a task? Read [Write a task](guide-task.md) and [Rewards and scoring](guide-rewards.md).
 - Evaluating agents? Read [Run and evaluate](guide-run-eval.md) and [The Gym adapter](guide-gym.md).
+- Training with RL? Read [RL training adapters](guide-rl-adapters.md).
 - Choosing a sandbox? Read the [Backends overview](backends.md).
 
 OpenCyberRL is released under the MIT license.

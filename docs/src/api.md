@@ -39,7 +39,9 @@ See [Rewards and scoring](guide-rewards.md).
 ## Adapters
 
 - `evaluate(task, model, n=1, out=None, backend=None)`: run `n` rollouts; return summary statistics; write JSONL when `out` is set.
-- `to_gym(task, backend=None)`: expose a task as a Gymnasium environment. Needs the `gym` extra.
+- `to_trl(task, backend=None)`: return `(environment_factory, reward_func)` for TRL GRPO training. Needs the `trl` extra.
+- `to_verl(task, backend=None, out_path=".", decode_callback=None)`: return `(parquet_path, reward_func)` for Verl training. Needs the `verl` extra.
+- `export_rollouts(task, model, n=16, backend=None, fmt="dpo")`: run `n` rollouts and export as a HuggingFace `Dataset` in DPO, SFT, or KTO format. Needs `datasets` installed.
 
 ## Backends
 

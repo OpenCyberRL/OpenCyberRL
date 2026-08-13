@@ -13,6 +13,7 @@
 - [Rewards and scoring](guide-rewards.md)
 - [Run and evaluate](guide-run-eval.md)
 - [The Gym adapter](guide-gym.md)
+- [RL training adapters](guide-rl-adapters.md)
 
 # Backends
 
