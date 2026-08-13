@@ -26,7 +26,8 @@ class Tool:
 
 shell = Tool(
     name="shell",
-    description="Run a shell command on your host and return its output.",
+    description="Run a shell command on your host and return its output "
+               "(stdout and stderr combined).",
     schema={
         "type": "object",
         "properties": {"command": {"type": "string"}},

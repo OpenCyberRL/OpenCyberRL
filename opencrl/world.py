@@ -9,7 +9,8 @@ class World(Protocol):
     agent: str  # name of the host the agent's shell runs on
 
     def exec(self, command: str, host: str | None = None) -> str:
-        """Run a command (on the agent host by default) and return combined output."""
+        """Run a command (on the agent host by default) and return combined
+        stdout and stderr as a single string."""
         ...
 
     def read_file(self, path: str, host: str | None = None) -> str | None:
