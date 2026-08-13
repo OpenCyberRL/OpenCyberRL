@@ -15,11 +15,15 @@ from opencrl.models import ScriptedModel, OpenAIModel
 from opencrl.rollout import rollout, Rollout
 from opencrl.adapters.eval import evaluate
 from opencrl.adapters.gym import to_gym
+from opencrl.adapters.trl_adapter import to_trl
+from opencrl.adapters.verl_adapter import to_verl
+from opencrl.adapters.export import export_rollouts
 
 __all__ = [
     "task", "Task", "Caps", "Tool", "shell",
     "flag", "contains", "file_exists", "stage", "chain", "goals", "Score",
     "rollout", "Rollout", "State", "evaluate", "to_gym",
+    "to_trl", "to_verl", "export_rollouts",
     "Docker", "Qemu", "MockBackend", "ScriptedModel", "OpenAIModel",
     "register_backend", "resolve_backend",
     "get_task", "list_tasks", "discover",

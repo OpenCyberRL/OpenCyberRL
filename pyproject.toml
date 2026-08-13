@@ -11,6 +11,8 @@ dependencies = ["pyyaml>=6.0"]
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
 gym = ["gymnasium>=0.29"]
+trl = ["trl>=1.10"]
+verl = ["verl>=0.8"]
 
 [project.scripts]
 opencrl = "opencrl.cli:main"
