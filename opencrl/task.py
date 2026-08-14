@@ -34,6 +34,7 @@ class Task:
     tools: tuple = ()
     caps: Caps = field(default_factory=Caps)
     max_steps: int = 30
+    reset: str | None = None  # opt-in pool: shell cmd restoring initial world state
     name: str = ""           # filled by @task
     dir: str = ""            # filled by @task (dir of the defining file)
 

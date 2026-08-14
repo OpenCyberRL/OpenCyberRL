@@ -66,23 +66,28 @@ class Episode:
         return State(world=self.world, transcript=self.transcript, answer=answer)
 
 
+def _play(task: Task, model, world) -> Rollout:
+    """Run one episode against an already-up world and score it. No up/down."""
+    episode = Episode(task, world)
+    messages = episode.start()
+    tool_schemas = [t.openai_schema() for t in task.tools]
+    answer = ""
+    for _ in range(task.max_steps):
+        reply = model(messages, tool_schemas)
+        messages.append(reply)
+        if reply.get("tool_calls"):
+            messages.extend(episode.run_tool_calls(reply["tool_calls"]))
+            continue
+        answer = reply.get("content") or ""
+        break
+    reward, stages = resolve_reward(task.reward(episode.state(answer)))
+    return Rollout(task.name, episode.transcript, reward, task.caps, stages)
+
+
 def rollout(task: Task, model, backend=None) -> Rollout:
     backend = resolve_backend(backend or task.backend)
     world = backend.up(load_world(task), task.caps)
     try:
-        episode = Episode(task, world)
-        messages = episode.start()
-        tool_schemas = [t.openai_schema() for t in task.tools]
-        answer = ""
-        for _ in range(task.max_steps):
-            reply = model(messages, tool_schemas)
-            messages.append(reply)
-            if reply.get("tool_calls"):
-                messages.extend(episode.run_tool_calls(reply["tool_calls"]))
-                continue
-            answer = reply.get("content") or ""
-            break
-        reward, stages = resolve_reward(task.reward(episode.state(answer)))
-        return Rollout(task.name, episode.transcript, reward, task.caps, stages)
+        return _play(task, model, world)
     finally:
         backend.down(world)
