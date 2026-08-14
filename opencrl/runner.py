@@ -132,12 +132,20 @@ class PoolRunner:
                     return
 
         threads = [threading.Thread(target=worker) for _ in range(size)]
+        started: list = []
         try:
             for t in threads:
                 t.start()
-            for t in threads:
+                started.append(t)
+            for t in started:
                 t.join()
         finally:
+            # Even on interruption (Ctrl-C during join) or a failed start, stop
+            # workers pulling new jobs and let every started worker finish before
+            # tearing worlds down — never down() a world under an active rollout.
+            abort.set()
+            for t in started:
+                t.join()
             for w in worlds:                 # tear down every world, even if one fails
                 try:
                     backend.down(w)
