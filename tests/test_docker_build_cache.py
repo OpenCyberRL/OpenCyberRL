@@ -67,11 +67,11 @@ def test_pin_build_images_distinguishes_by_target():
 def test_docker_is_picklable():
     import pickle
     be = Docker()
-    be._built.add("opencrl-build-abc")
+    be._built["shared:latest"] = "abc"
     be2 = pickle.loads(pickle.dumps(be))
     with be2._built_lock:            # recreated lock is usable
         pass
-    assert be2._built == {"opencrl-build-abc"}
+    assert be2._built == {"shared:latest": "abc"}
 
 
 def test_pin_build_images_distinguishes_by_platform():
@@ -94,3 +94,18 @@ def test_build_cache_keyed_by_config_not_explicit_image(monkeypatch):
     ups = [c for c in fake.calls if "up" in c]
     # same explicit image but different build config -> distinct identities -> both build
     assert len(ups) == 2 and all("--build" in c for c in ups)
+
+
+def test_build_cache_invalidates_shared_explicit_tag(monkeypatch):
+    fake = FakeRun(); monkeypatch.setattr(dk, "_run", fake)
+    be = Docker()
+    A = {"services": {"a": {"build": {"context": "/c", "target": "A"},
+                            "image": "shared:latest"}}}
+    B = {"services": {"a": {"build": {"context": "/c", "target": "B"},
+                            "image": "shared:latest"}}}
+    be.up(A, Caps())
+    be.up(B, Caps())          # overwrites shared:latest with B's build
+    fake.calls.clear()
+    be.up(A, Caps())          # tag now owned by B -> A must rebuild, not reuse B
+    ups = [c for c in fake.calls if "up" in c]
+    assert ups and all("--build" in c for c in ups)
