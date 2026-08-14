@@ -7,8 +7,8 @@ from opencrl.runner import run_batch
 from opencrl.task import Task
 
 
-def export_rollouts(task: Task, model=None, *, model_factory=None, n: int = 16,
-                    backend=None, fmt: str = "dpo",
+def export_rollouts(task: Task, model=None, n: int = 16, backend=None,
+                    fmt: str = "dpo", *, model_factory=None,
                     concurrency: int | None = None) -> "Dataset":
     """Run N rollouts and export as a HuggingFace Dataset.
 

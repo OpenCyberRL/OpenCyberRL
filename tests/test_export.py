@@ -172,3 +172,9 @@ def test_export_rollouts_concurrent():
     ds = export_rollouts(make_task(), model, n=4, backend=MockBackend(),
                          fmt="kto", concurrency=4)
     assert len(ds) == 4
+
+
+def test_export_rollouts_accepts_positional_args():
+    model = lambda m, t: {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+    ds = export_rollouts(make_task(), model, 4, MockBackend(), "kto")  # n, backend, fmt positional
+    assert len(ds) == 4

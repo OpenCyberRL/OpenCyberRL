@@ -8,8 +8,8 @@ from opencrl.runner import run_batch
 from opencrl.task import Task
 
 
-def evaluate(task: Task, model=None, *, model_factory=None, n: int = 1,
-             out: str | None = None, backend=None,
+def evaluate(task: Task, model=None, n: int = 1, out: str | None = None,
+             backend=None, *, model_factory=None,
              concurrency: int | None = None) -> dict:
     rewards: list[float] = [0.0] * n
     stage_sums: dict[str, float] = defaultdict(float)

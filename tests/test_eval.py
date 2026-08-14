@@ -108,3 +108,10 @@ def test_evaluate_accepts_model_factory(tmp_path):
     stats = evaluate(make_task(), model_factory=factory, n=3,
                      backend=MockBackend(), concurrency=3)
     assert stats["mean_reward"] == 1.0
+
+
+def test_evaluate_accepts_positional_args(tmp_path):
+    out = tmp_path / "l.jsonl"
+    model = lambda m, t: {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+    stats = evaluate(make_task(), model, 2, str(out), MockBackend())  # n, out, backend positional
+    assert stats["n"] == 2 and stats["mean_reward"] == 1.0
