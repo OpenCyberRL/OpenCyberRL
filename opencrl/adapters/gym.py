@@ -12,24 +12,7 @@ from opencrl.task import Task, load_world
 
 def to_gym(task: Task, backend=None, _resolved_backend=None):
     import gymnasium as gym
-
-    class _MessageSpace(gym.spaces.Space):
-        """Permissive space for OpenAI-style message dicts (or, if sequence=True,
-        a transcript list of them). LLM tool-call messages don't fit numeric Gym
-        spaces, so this validates shape without pretending to be a Box/Text."""
-        def __init__(self, sequence=False):
-            super().__init__(shape=None, dtype=None)
-            self._sequence = sequence
-
-        def contains(self, x):
-            if self._sequence:
-                return isinstance(x, list) and all(isinstance(m, dict) for m in x)
-            return isinstance(x, dict)
-
-        def sample(self, mask=None):
-            if self._sequence:
-                return []
-            return {"role": "assistant", "content": "", "tool_calls": None}
+    from opencrl.adapters._gym_space import MessageSpace
 
     class OpencrlEnv(gym.Env):
         def __init__(self):
@@ -41,8 +24,8 @@ def to_gym(task: Task, backend=None, _resolved_backend=None):
             # Actions are OpenAI-style assistant-message dicts and observations are
             # message transcripts — neither fits a standard numeric Gym space, so these
             # are permissive placeholders provided so the env satisfies the Gym API.
-            self.action_space = _MessageSpace()
-            self.observation_space = _MessageSpace(sequence=True)
+            self.action_space = MessageSpace()
+            self.observation_space = MessageSpace(sequence=True)
 
         def reset(self, *, seed=None, options=None):
             super().reset(seed=seed)
@@ -89,5 +72,9 @@ def to_gym_vector(task: Task, num_envs: int, backend=None, async_mode: bool = Fa
     if prebuild is not None:
         prebuild(load_world(task), task.caps)
     make = lambda: to_gym(task, _resolved_backend=resolved)
-    VecCls = gym.vector.AsyncVectorEnv if async_mode else gym.vector.SyncVectorEnv
-    return VecCls([make for _ in range(num_envs)])
+    if async_mode:
+        # observations are Python message objects, not arrays — gym has no
+        # shared-memory handler for this custom space, so disable it.
+        return gym.vector.AsyncVectorEnv([make for _ in range(num_envs)],
+                                         shared_memory=False)
+    return gym.vector.SyncVectorEnv([make for _ in range(num_envs)])
