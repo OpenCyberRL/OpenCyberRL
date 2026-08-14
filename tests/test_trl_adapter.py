@@ -174,3 +174,17 @@ def test_trl_reward_func_handles_conversational_prompts():
     results = reward_func(prompts=prompts, completions=completions,
                          completion_ids=None)
     assert results[0] == 1.0
+
+
+def test_to_trl_prebuilds_shared_backend_once():
+    calls = []
+
+    class PrebuildBackend(MockBackend):
+        def prebuild(self, spec, caps):
+            calls.append(1)
+
+    env_cls, _ = to_trl(make_task(), backend=PrebuildBackend())
+    assert calls == [1]                  # prebuilt once at adapter construction
+    env = env_cls()
+    env.reset()
+    env._close()

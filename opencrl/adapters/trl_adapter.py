@@ -24,6 +24,9 @@ def to_trl(task: Task, backend=None):
     Requires the `trl` extra: pip install opencrl[trl]
     """
     resolved_backend = resolve_backend(backend or task.backend)
+    _prebuild = getattr(resolved_backend, "prebuild", None)
+    if _prebuild is not None:            # build images once; concurrent envs reuse them
+        _prebuild(load_world(task), task.caps)
 
     class OpenCRLREnvironment:
         """TRL environment backed by an OpenCyberRL sandboxed world.
