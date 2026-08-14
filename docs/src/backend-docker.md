@@ -54,6 +54,32 @@ The backend marks every network `internal: true`, so containers get no external
 egress. To allow egress, set `caps=Caps(needs_internet=True)` on the task. The
 backend then leaves the networks reachable.
 
+## Build-once and concurrency
+
+When you run many rollouts of one task (`evaluate`, `export_rollouts`,
+`run_batch`, `to_gym_vector`), the backend builds each `build:` image once and
+reuses it instead of rebuilding per episode. Images get a stable, content-
+derived tag, and a shared `Docker` instance prebuilds them before the run fans
+out, so concurrent episodes don't all rebuild the same image. Each episode still
+gets its own fresh containers — no state leaks between rollouts.
+
+### Reusing running worlds (opt-in)
+
+For higher throughput on a task whose world can be reset in place, set a `reset`
+command on the task and pass `pool=True` to `run_batch`. The runner keeps a
+small pool of live worlds and runs the reset command between episodes instead of
+recreating containers:
+
+```python
+task = Task(..., reset="rm -rf /work/* && seed-flag")
+run_batch(task, model, n=64, concurrency=8, pool=True)
+```
+
+Pooling trusts your `reset` to fully restore the initial state. A reset that
+misses agent-made changes silently corrupts scoring, so it is off by default and
+unsafe for tasks where the agent gains root or mutates hosts. Leave it off
+unless the task is genuinely resettable.
+
 ## Trust boundary
 
 The sandbox isolates an untrusted **agent**. The agent runs inside a container

@@ -78,6 +78,36 @@ print(stats["stage_means"])   # the mean of each stage, for a staged reward
 
 `stage_means` shows which sub-task agents reach and where they stop.
 
+## Run concurrently
+
+`evaluate()` and `export_rollouts()` run their `n` rollouts concurrently. Set
+`concurrency` to bound the worker pool (it defaults to `min(n, cpu_count)`):
+
+```python
+stats = evaluate(task, OpenAIModel("gpt-4o-mini"), n=64, concurrency=8)
+```
+
+Each rollout still gets its own isolated world, so concurrency multiplies the
+Docker/host load — size it to what the host can hold.
+
+**One model, many rollouts.** A shared `model` must be safe for concurrent
+calls; `OpenAIModel` is. A stateful model like `ScriptedModel` must not be
+shared — pass `model_factory` instead, so each rollout gets a fresh instance:
+
+```python
+stats = evaluate(task, model_factory=lambda: ScriptedModel([...]),
+                 n=8, concurrency=4)
+```
+
+Set `concurrency=1` for deterministic, serial execution.
+
+`run_batch(task, model=None, *, model_factory=None, n, concurrency=None,
+backend=None) -> list[Rollout]` is the underlying primitive when you want the
+raw rollouts. When a rollout raises, it stops starting new ones and re-raises;
+rollouts already in flight finish and tear down their worlds. With `out=` on
+`evaluate()`, every rollout that completed before a crash is flushed to disk
+(under concurrency the exact count is not deterministic).
+
 ## Models
 
 A model is any callable that maps messages and tools to an assistant message.

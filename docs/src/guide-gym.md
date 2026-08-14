@@ -42,3 +42,18 @@ A staged reward reports its aggregate float here, the same value `rollout()`
 returns.
 
 Call `env.close()` to stop the world.
+
+## Many environments at once
+
+`to_gym_vector(task, num_envs, backend=None)` returns a Gymnasium vector env of
+`num_envs` copies that share one prebuilt backend, so the image builds once for
+the whole batch:
+
+```python
+from opencrl import to_gym_vector
+
+venv = to_gym_vector(task, num_envs=8)
+obs, infos = venv.reset()
+```
+
+Pass `async_mode=True` for a process-backed `AsyncVectorEnv`.
