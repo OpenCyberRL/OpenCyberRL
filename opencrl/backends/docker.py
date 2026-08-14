@@ -33,32 +33,32 @@ def _run(args: list[str], timeout: float | None = None) -> subprocess.CompletedP
                           errors="replace", timeout=timeout)
 
 
-def _pin_build_images(doc: dict) -> list[tuple[str, str]]:
-    """Assign every `build:` service a deterministic image tag (only when it
-    declares none) and return (image_ref, identity) pairs for the build cache.
+def _pin_build_images(doc: dict, basedir: str = "") -> list[str]:
+    """Override every `build:` service's image with a deterministic,
+    content-addressed tag and return the per-service build identities (digests).
 
-    `identity` digests the full effective build config plus the service-level
-    `platform` (outside `build:` but selects the architecture). The cache keys
-    on the emitted image reference and remembers which identity last built it,
-    so a service pinning an explicit `image:` shared with a different build
-    config is rebuilt rather than silently reused, and services differing only
-    by target / dockerfile_inline / additional_contexts / args / platform stay
-    distinct.
+    The digest covers `basedir` (Compose resolves an omitted build context to the
+    project directory), the service `platform` (outside `build:`, selects the
+    architecture), and the full effective build config — so distinct build inputs
+    never collide on a tag. Overriding (not defaulting) the image means an
+    explicit `image:` shared across different build configs can't alias, which
+    removes any need for ownership bookkeeping or shared-tag locking. Services
+    with no `build:` key are untouched.
     """
-    pins: list[tuple[str, str]] = []
+    identities: list[str] = []
     for svc in (doc.get("services") or {}).values():
-        build = svc.get("build")
-        if not build:
+        if "build" not in svc:
             continue
+        build = svc["build"]
         platform = str(svc.get("platform", ""))
         if isinstance(build, str):
-            key = f"{platform}|{build}"
+            build_key = build
         else:
-            key = platform + "|" + json.dumps(build, sort_keys=True, default=str)
-        digest = hashlib.sha256(key.encode()).hexdigest()[:12]
-        svc.setdefault("image", f"opencrl-build-{digest}")
-        pins.append((svc["image"], digest))
-    return pins
+            build_key = json.dumps(build or {}, sort_keys=True, default=str)
+        digest = hashlib.sha256(f"{basedir}|{platform}|{build_key}".encode()).hexdigest()[:12]
+        svc["image"] = f"opencrl-build-{digest}"     # unique per build config
+        identities.append(digest)
+    return identities
 
 
 class DockerWorld:
@@ -109,7 +109,7 @@ class Docker:
         self.cpus = cpus
         self.memory = memory
         self.exec_timeout = exec_timeout
-        self._built: dict[str, str] = {}       # image ref -> digest that last built it
+        self._built: set[str] = set()          # build identities (digests) built this instance
         self._built_lock = threading.Lock()
 
     def __getstate__(self):
@@ -176,8 +176,8 @@ class Docker:
         spec = spec or {}
         basedir = basedir_of(spec)
         doc, _agent = self._render(spec, caps)
-        pins = _pin_build_images(doc)
-        if not pins:
+        identities = _pin_build_images(doc, basedir)
+        if not identities:
             return
         path = self._write_compose(doc)
         project = f"opencrl-prebuild-{uuid.uuid4().hex[:8]}"
@@ -189,8 +189,7 @@ class Docker:
             if cp.returncode != 0:
                 raise RuntimeError(f"docker compose build failed:\n{cp.stderr}")
             with self._built_lock:
-                for img, dig in pins:
-                    self._built[img] = dig
+                self._built.update(identities)
         finally:
             try:
                 os.unlink(path)
@@ -202,7 +201,7 @@ class Docker:
         # Read before _render pops `x-opencrl` off the spec.
         basedir = basedir_of(spec)
         doc, agent = self._render(spec, caps)
-        pins = _pin_build_images(doc)
+        identities = _pin_build_images(doc, basedir)
         project = f"opencrl-{uuid.uuid4().hex[:8]}"
         path = self._write_compose(doc)
         base = ["docker", "compose", "-p", project, "-f", path]
@@ -212,10 +211,10 @@ class Docker:
             # instead of the task directory they were written against.
             base += ["--project-directory", basedir]
         with self._built_lock:
-            need_build = [img for img, dig in pins if self._built.get(img) != dig]
-        # Build only images whose current owner isn't this exact build config; a
-        # world with no build: still gets --build (a no-op) to preserve prior behavior.
-        build_flag = ["--build"] if (need_build or not pins) else []
+            need_build = [d for d in identities if d not in self._built]
+        # Build only identities not yet built by this instance; a world with no
+        # build: still gets --build (a no-op) to preserve prior behavior.
+        build_flag = ["--build"] if (need_build or not identities) else []
         # No timeout: image builds are slow and legitimately open-ended.
         cp = _run(base + ["up", "-d"] + build_flag, timeout=None)
         if cp.returncode != 0:
@@ -227,10 +226,9 @@ class Docker:
             except OSError:
                 pass
             raise RuntimeError(f"docker compose up failed:\n{cp.stderr}")
-        if pins:
+        if identities:
             with self._built_lock:
-                for img, dig in pins:
-                    self._built[img] = dig
+                self._built.update(identities)
         return DockerWorld(project, path, agent, basedir, exec_timeout=self.exec_timeout)
 
     def down(self, world: DockerWorld) -> None:

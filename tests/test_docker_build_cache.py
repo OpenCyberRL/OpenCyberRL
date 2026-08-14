@@ -67,11 +67,11 @@ def test_pin_build_images_distinguishes_by_target():
 def test_docker_is_picklable():
     import pickle
     be = Docker()
-    be._built["shared:latest"] = "abc"
+    be._built.add("abc")
     be2 = pickle.loads(pickle.dumps(be))
     with be2._built_lock:            # recreated lock is usable
         pass
-    assert be2._built == {"shared:latest": "abc"}
+    assert be2._built == {"abc"}
 
 
 def test_pin_build_images_distinguishes_by_platform():
@@ -92,20 +92,33 @@ def test_build_cache_keyed_by_config_not_explicit_image(monkeypatch):
     be.up(s1, Caps())
     be.up(s2, Caps())
     ups = [c for c in fake.calls if "up" in c]
-    # same explicit image but different build config -> distinct identities -> both build
+    # explicit image overridden with unique content tags -> different configs both build
     assert len(ups) == 2 and all("--build" in c for c in ups)
 
 
-def test_build_cache_invalidates_shared_explicit_tag(monkeypatch):
+def test_build_cache_reuses_unique_tag_across_specs(monkeypatch):
     fake = FakeRun(); monkeypatch.setattr(dk, "_run", fake)
     be = Docker()
-    A = {"services": {"a": {"build": {"context": "/c", "target": "A"},
-                            "image": "shared:latest"}}}
-    B = {"services": {"a": {"build": {"context": "/c", "target": "B"},
-                            "image": "shared:latest"}}}
+    A = {"services": {"a": {"build": {"context": "/c", "target": "A"}}}}
+    B = {"services": {"a": {"build": {"context": "/c", "target": "B"}}}}
     be.up(A, Caps())
-    be.up(B, Caps())          # overwrites shared:latest with B's build
+    be.up(B, Caps())          # different config -> its own unique tag, doesn't touch A's
     fake.calls.clear()
-    be.up(A, Caps())          # tag now owned by B -> A must rebuild, not reuse B
+    be.up(A, Caps())          # A's unique content tag is intact -> reuse, no rebuild
     ups = [c for c in fake.calls if "up" in c]
-    assert ups and all("--build" in c for c in ups)
+    assert ups and all("--build" not in c for c in ups)
+
+
+def test_pin_build_images_includes_basedir_for_omitted_context():
+    a = {"services": {"x": {"build": {"dockerfile": "Dockerfile"}}}}
+    b = {"services": {"x": {"build": {"dockerfile": "Dockerfile"}}}}
+    _pin_build_images(a, "/task/a")
+    _pin_build_images(b, "/task/b")
+    # omitted context resolves to the project dir -> different dirs must not alias
+    assert a["services"]["x"]["image"] != b["services"]["x"]["image"]
+
+
+def test_pin_build_images_treats_empty_mapping_as_build():
+    d = {"services": {"x": {"build": {}}}}
+    ids = _pin_build_images(d, "/task")
+    assert ids and d["services"]["x"]["image"].startswith("opencrl-build-")
