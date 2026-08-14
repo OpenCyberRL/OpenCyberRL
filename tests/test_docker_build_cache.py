@@ -80,3 +80,17 @@ def test_pin_build_images_distinguishes_by_platform():
     _pin_build_images(a)
     _pin_build_images(b)
     assert a["services"]["x"]["image"] != b["services"]["x"]["image"]
+
+
+def test_build_cache_keyed_by_config_not_explicit_image(monkeypatch):
+    fake = FakeRun(); monkeypatch.setattr(dk, "_run", fake)
+    be = Docker()
+    s1 = {"services": {"a": {"build": {"context": "/c", "target": "one"},
+                             "image": "shared:latest"}}}
+    s2 = {"services": {"a": {"build": {"context": "/c", "target": "two"},
+                             "image": "shared:latest"}}}
+    be.up(s1, Caps())
+    be.up(s2, Caps())
+    ups = [c for c in fake.calls if "up" in c]
+    # same explicit image but different build config -> distinct identities -> both build
+    assert len(ups) == 2 and all("--build" in c for c in ups)

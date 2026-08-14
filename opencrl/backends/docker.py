@@ -34,31 +34,31 @@ def _run(args: list[str], timeout: float | None = None) -> subprocess.CompletedP
 
 
 def _pin_build_images(doc: dict) -> list[str]:
-    """Give every `build:` service a stable image tag derived from its build spec.
+    """Assign every `build:` service a deterministic image tag (only when it
+    declares none) and return the per-service build IDENTITIES.
 
-    Independent of the compose project name, so an image built under any project
-    is reused by a later `up` under a different project. Returns the tags.
-    Services that already declare `image:` (no build) are untouched.
+    An identity is a digest of the full effective build config plus the
+    service-level `platform` (which lives outside `build:` but selects the build
+    architecture). It is independent of the (possibly explicit) image name, so
+    two specs sharing an explicit `image:` but differing in build config are not
+    aliased in the build cache, and services differing only by
+    target / dockerfile_inline / additional_contexts / args / platform get
+    distinct identities.
     """
-    tags: list[str] = []
+    identities: list[str] = []
     for svc in (doc.get("services") or {}).values():
         build = svc.get("build")
         if not build:
             continue
-        # Hash the full effective build config PLUS the service-level `platform`
-        # (which lives outside `build:` but selects the build architecture) so
-        # target / dockerfile_inline / additional_contexts / args / platform all
-        # change the tag — otherwise two services differing only by one of those
-        # collide on a single image tag and overwrite it.
         platform = str(svc.get("platform", ""))
         if isinstance(build, str):
             key = f"{platform}|{build}"
         else:
             key = platform + "|" + json.dumps(build, sort_keys=True, default=str)
-        tag = "opencrl-build-" + hashlib.sha256(key.encode()).hexdigest()[:12]
-        svc.setdefault("image", tag)
-        tags.append(svc["image"])
-    return tags
+        digest = hashlib.sha256(key.encode()).hexdigest()[:12]
+        svc.setdefault("image", f"opencrl-build-{digest}")
+        identities.append(digest)
+    return identities
 
 
 class DockerWorld:
@@ -176,8 +176,8 @@ class Docker:
         spec = spec or {}
         basedir = basedir_of(spec)
         doc, _agent = self._render(spec, caps)
-        tags = _pin_build_images(doc)
-        if not tags:
+        identities = _pin_build_images(doc)
+        if not identities:
             return
         path = self._write_compose(doc)
         project = f"opencrl-prebuild-{uuid.uuid4().hex[:8]}"
@@ -189,7 +189,7 @@ class Docker:
             if cp.returncode != 0:
                 raise RuntimeError(f"docker compose build failed:\n{cp.stderr}")
             with self._built_lock:
-                self._built.update(tags)
+                self._built.update(identities)
         finally:
             try:
                 os.unlink(path)
@@ -201,7 +201,7 @@ class Docker:
         # Read before _render pops `x-opencrl` off the spec.
         basedir = basedir_of(spec)
         doc, agent = self._render(spec, caps)
-        tags = _pin_build_images(doc)
+        identities = _pin_build_images(doc)
         project = f"opencrl-{uuid.uuid4().hex[:8]}"
         path = self._write_compose(doc)
         base = ["docker", "compose", "-p", project, "-f", path]
@@ -211,10 +211,10 @@ class Docker:
             # instead of the task directory they were written against.
             base += ["--project-directory", basedir]
         with self._built_lock:
-            need_build = [t for t in tags if t not in self._built]
-        # Build only tags not yet built by this instance; a world with no
+            need_build = [d for d in identities if d not in self._built]
+        # Build only identities not yet built by this instance; a world with no
         # build: still gets --build (a no-op) to preserve prior behavior.
-        build_flag = ["--build"] if (need_build or not tags) else []
+        build_flag = ["--build"] if (need_build or not identities) else []
         # No timeout: image builds are slow and legitimately open-ended.
         cp = _run(base + ["up", "-d"] + build_flag, timeout=None)
         if cp.returncode != 0:
@@ -226,9 +226,9 @@ class Docker:
             except OSError:
                 pass
             raise RuntimeError(f"docker compose up failed:\n{cp.stderr}")
-        if tags:
+        if identities:
             with self._built_lock:
-                self._built.update(tags)
+                self._built.update(identities)
         return DockerWorld(project, path, agent, basedir, exec_timeout=self.exec_timeout)
 
     def down(self, world: DockerWorld) -> None:
