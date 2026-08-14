@@ -54,3 +54,21 @@ def test_up_builds_when_not_cached(monkeypatch):
     be.up(_spec(), Caps())
     up_calls = [c for c in fake.calls if "up" in c]
     assert any("--build" in c for c in up_calls)
+
+
+def test_pin_build_images_distinguishes_by_target():
+    a = {"services": {"x": {"build": {"context": "/c", "target": "prod"}}}}
+    b = {"services": {"x": {"build": {"context": "/c", "target": "dev"}}}}
+    _pin_build_images(a)
+    _pin_build_images(b)
+    assert a["services"]["x"]["image"] != b["services"]["x"]["image"]
+
+
+def test_docker_is_picklable():
+    import pickle
+    be = Docker()
+    be._built.add("opencrl-build-abc")
+    be2 = pickle.loads(pickle.dumps(be))
+    with be2._built_lock:            # recreated lock is usable
+        pass
+    assert be2._built == {"opencrl-build-abc"}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 import shlex
 import subprocess
@@ -44,11 +45,13 @@ def _pin_build_images(doc: dict) -> list[str]:
         build = svc.get("build")
         if not build:
             continue
+        # Hash the full effective build config so target / dockerfile_inline /
+        # additional_contexts / args all change the tag — otherwise two services
+        # differing only by `target` collide on one image tag and overwrite it.
         if isinstance(build, str):
-            key = f"ctx={build}"
+            key = build
         else:
-            key = (f"ctx={build.get('context', '')}|"
-                   f"df={build.get('dockerfile', '')}|args={build.get('args', '')!r}")
+            key = json.dumps(build, sort_keys=True, default=str)
         tag = "opencrl-build-" + hashlib.sha256(key.encode()).hexdigest()[:12]
         svc.setdefault("image", tag)
         tags.append(svc["image"])
@@ -104,6 +107,17 @@ class Docker:
         self.memory = memory
         self.exec_timeout = exec_timeout
         self._built: set[str] = set()          # image tags already built this instance
+        self._built_lock = threading.Lock()
+
+    def __getstate__(self):
+        # threading.Lock isn't picklable; drop it so a Docker instance survives
+        # cloudpickling into spawn-based multiprocessing (async gym vectors).
+        state = self.__dict__.copy()
+        state.pop("_built_lock", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
         self._built_lock = threading.Lock()
 
     def _render(self, spec: dict, caps: Caps) -> tuple[dict, str]:
