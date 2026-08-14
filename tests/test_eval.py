@@ -58,7 +58,8 @@ def test_evaluate_flushes_each_rollout_before_exception(tmp_path):
         return {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
 
     try:
-        evaluate(make_task(), flaky_model, n=3, out=str(out), backend=MockBackend())
+        evaluate(make_task(), flaky_model, n=3, out=str(out), backend=MockBackend(),
+                 concurrency=1)
     except RuntimeError:
         pass  # expected
 
@@ -83,8 +84,27 @@ def test_evaluate_flushes_each_rollout_to_disk_during_eval(tmp_path):
             seen_during_call_2[0] = out.read_text().strip().splitlines()
         return {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
 
-    evaluate(make_task(), inspect_model, n=2, out=str(out), backend=MockBackend())
+    evaluate(make_task(), inspect_model, n=2, out=str(out), backend=MockBackend(),
+             concurrency=1)
 
     assert seen_during_call_2[0] is not None, "output file did not exist during 2nd rollout"
     assert len(seen_during_call_2[0]) == 1
     assert json.loads(seen_during_call_2[0][0])["reward"] == 1.0
+
+
+def test_evaluate_concurrent_completes_all(tmp_path):
+    out = tmp_path / "log.jsonl"
+    model = lambda m, t: {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+    stats = evaluate(make_task(), model, n=6, out=str(out),
+                     backend=MockBackend(), concurrency=4)
+    assert stats["n"] == 6 and stats["mean_reward"] == 1.0
+    assert len(out.read_text().strip().splitlines()) == 6   # every rollout flushed
+
+
+def test_evaluate_accepts_model_factory(tmp_path):
+    from opencrl.models import ScriptedModel
+    factory = lambda: ScriptedModel([{"role": "assistant", "content": "CTF{win}",
+                                       "tool_calls": None}])
+    stats = evaluate(make_task(), model_factory=factory, n=3,
+                     backend=MockBackend(), concurrency=3)
+    assert stats["mean_reward"] == 1.0
