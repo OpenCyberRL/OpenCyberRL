@@ -92,24 +92,39 @@ class PoolRunner:
         worlds: list = []
         worlds_lock = threading.Lock()
 
+        abort = threading.Event()            # first failure stops pending jobs
+        errors: list[BaseException] = []
+
         def worker() -> None:
-            world = backend.up(load_world(task), task.caps)
+            try:
+                world = backend.up(load_world(task), task.caps)
+            except BaseException as e:       # never came up: nothing to tear down
+                with lock:
+                    errors.append(e)
+                abort.set()
+                return
             with worlds_lock:
                 worlds.append(world)
             first = True
-            while True:
+            while not abort.is_set():
                 try:
                     i = jobs.get_nowait()
                 except Empty:
                     return
-                if not first:
-                    world.exec(self.reset)   # restore initial state between episodes
-                first = False
-                r = _play(task, models[i], world)
-                if on_result is not None:
+                try:
+                    if not first:
+                        world.exec(self.reset)   # restore initial state between episodes
+                    first = False
+                    r = _play(task, models[i], world)
+                    if on_result is not None:
+                        with lock:
+                            on_result(i, r)
+                    results[i] = r
+                except BaseException as e:    # reset / _play / on_result failure
                     with lock:
-                        on_result(i, r)
-                results[i] = r
+                        errors.append(e)
+                    abort.set()
+                    return
 
         threads = [threading.Thread(target=worker) for _ in range(size)]
         try:
@@ -120,6 +135,8 @@ class PoolRunner:
         finally:
             for w in worlds:
                 backend.down(w)
+        if errors:                           # match ThreadRunner: re-raise the first failure
+            raise errors[0]
         return results  # type: ignore[return-value]
 
 
