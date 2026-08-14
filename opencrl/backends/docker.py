@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 
 import yaml
@@ -28,6 +30,29 @@ _MAX_OUTPUT = 100_000
 def _run(args: list[str], timeout: float | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True,
                           errors="replace", timeout=timeout)
+
+
+def _pin_build_images(doc: dict) -> list[str]:
+    """Give every `build:` service a stable image tag derived from its build spec.
+
+    Independent of the compose project name, so an image built under any project
+    is reused by a later `up` under a different project. Returns the tags.
+    Services that already declare `image:` (no build) are untouched.
+    """
+    tags: list[str] = []
+    for svc in (doc.get("services") or {}).values():
+        build = svc.get("build")
+        if not build:
+            continue
+        if isinstance(build, str):
+            key = f"ctx={build}"
+        else:
+            key = (f"ctx={build.get('context', '')}|"
+                   f"df={build.get('dockerfile', '')}|args={build.get('args', '')!r}")
+        tag = "opencrl-build-" + hashlib.sha256(key.encode()).hexdigest()[:12]
+        svc.setdefault("image", tag)
+        tags.append(svc["image"])
+    return tags
 
 
 class DockerWorld:
@@ -78,6 +103,8 @@ class Docker:
         self.cpus = cpus
         self.memory = memory
         self.exec_timeout = exec_timeout
+        self._built: set[str] = set()          # image tags already built this instance
+        self._built_lock = threading.Lock()
 
     def _render(self, spec: dict, caps: Caps) -> tuple[dict, str]:
         doc = copy.deepcopy(spec)
@@ -120,23 +147,59 @@ class Docker:
                            for name in (set(declared) | used)}
         return doc, agent
 
+    def _write_compose(self, doc: dict) -> str:
+        fd, path = tempfile.mkstemp(prefix="opencrl-", suffix=".yml")
+        with os.fdopen(fd, "w") as f:
+            yaml.safe_dump(doc, f)
+        return path
+
+    def prebuild(self, spec: dict, caps: Caps) -> None:
+        """Build a task's images ONCE (into stable tags) before fan-out, so N
+        concurrent up()s don't each rebuild. No-op if the world has no build:."""
+        spec = spec or {}
+        basedir = basedir_of(spec)
+        doc, _agent = self._render(spec, caps)
+        tags = _pin_build_images(doc)
+        if not tags:
+            return
+        path = self._write_compose(doc)
+        project = f"opencrl-prebuild-{uuid.uuid4().hex[:8]}"
+        base = ["docker", "compose", "-p", project, "-f", path]
+        if basedir:
+            base += ["--project-directory", basedir]
+        try:
+            cp = _run(base + ["build"], timeout=None)
+            if cp.returncode != 0:
+                raise RuntimeError(f"docker compose build failed:\n{cp.stderr}")
+            with self._built_lock:
+                self._built.update(tags)
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
     def up(self, spec: dict, caps: Caps) -> DockerWorld:
         spec = spec or {}
         # Read before _render pops `x-opencrl` off the spec.
         basedir = basedir_of(spec)
         doc, agent = self._render(spec, caps)
+        tags = _pin_build_images(doc)
         project = f"opencrl-{uuid.uuid4().hex[:8]}"
-        fd, path = tempfile.mkstemp(prefix="opencrl-", suffix=".yml")
-        with os.fdopen(fd, "w") as f:
-            yaml.safe_dump(doc, f)
+        path = self._write_compose(doc)
         base = ["docker", "compose", "-p", project, "-f", path]
         if basedir:
             # Compose file lives in a tempdir; without this, relative
             # env_file/bind-mount/configs paths resolve against the tempdir
             # instead of the task directory they were written against.
             base += ["--project-directory", basedir]
+        with self._built_lock:
+            need_build = [t for t in tags if t not in self._built]
+        # Build only tags not yet built by this instance; a world with no
+        # build: still gets --build (a no-op) to preserve prior behavior.
+        build_flag = ["--build"] if (need_build or not tags) else []
         # No timeout: image builds are slow and legitimately open-ended.
-        cp = _run(base + ["up", "-d", "--build"], timeout=None)
+        cp = _run(base + ["up", "-d"] + build_flag, timeout=None)
         if cp.returncode != 0:
             # Best-effort cleanup of anything that started before the failure,
             # so a failed up() never leaks containers/networks or the temp file.
@@ -146,6 +209,9 @@ class Docker:
             except OSError:
                 pass
             raise RuntimeError(f"docker compose up failed:\n{cp.stderr}")
+        if tags:
+            with self._built_lock:
+                self._built.update(tags)
         return DockerWorld(project, path, agent, basedir, exec_timeout=self.exec_timeout)
 
     def down(self, world: DockerWorld) -> None:
