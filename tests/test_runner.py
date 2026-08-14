@@ -70,3 +70,20 @@ def test_run_batch_calls_prebuild_once():
         def prebuild(self, spec, caps): calls.append(1)
     run_batch(make_task(), _answer_model(), n=3, backend=PrebuildBackend())
     assert calls == [1]
+
+
+def test_run_batch_aborts_when_on_result_raises():
+    ups = []
+
+    class BE(MockBackend):
+        def up(self, spec, caps):
+            ups.append(1)
+            return MockWorld()
+
+    def bad(i, r):
+        raise RuntimeError("callback boom")
+
+    with pytest.raises(RuntimeError, match="callback boom"):
+        run_batch(make_task(), _answer_model(), n=5, concurrency=1,
+                  backend=BE(), on_result=bad)
+    assert len(ups) == 1   # aborted after the first; remaining rollouts skip up()

@@ -54,13 +54,13 @@ class ThreadRunner:
                 return
             try:
                 r = rollout(task, models[i], backend=backend)
-            except BaseException:
+                if on_result is not None:
+                    with lock:
+                        on_result(i, r)
+                results[i] = r
+            except BaseException:  # rollout OR on_result failure stops pending work
                 abort.set()
                 raise
-            if on_result is not None:
-                with lock:
-                    on_result(i, r)
-            results[i] = r
 
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futures = [ex.submit(one, i) for i in range(n)]
@@ -72,12 +72,13 @@ class ThreadRunner:
 class PoolRunner:
     """Keep `concurrency` live worlds; reset (not down/up) between episodes.
 
-    Trusts task.reset to fully restore initial state. Off by default and
+    Trusts the reset hook to fully restore initial state. Off by default and
     requires a reset hook — a bad reset silently corrupts scoring.
     """
 
-    def __init__(self, concurrency: int | None = None):
+    def __init__(self, concurrency: int | None = None, reset: str | None = None):
         self.concurrency = concurrency
+        self.reset = reset
 
     def run(self, task, *, models, backend, on_result=None) -> list[Rollout]:
         n = len(models)
@@ -102,7 +103,7 @@ class PoolRunner:
                 except Empty:
                     return
                 if not first:
-                    world.exec(task.reset)   # restore initial state between episodes
+                    world.exec(self.reset)   # restore initial state between episodes
                 first = False
                 r = _play(task, models[i], world)
                 if on_result is not None:
@@ -135,15 +136,18 @@ def run_batch(task: Task, model=None, *, model_factory=None, n: int,
     """
     models = _resolve_models(model, model_factory, n)
     resolved = resolve_backend(backend or task.backend)
+    world_spec = load_world(task)
     prebuild = getattr(resolved, "prebuild", None)
     if prebuild is not None:
-        prebuild(load_world(task), task.caps)
+        prebuild(world_spec, task.caps)
     if pool:
-        if not task.reset:
+        reset_cmd = task.reset or (world_spec.get("x-opencrl") or {}).get("reset")
+        if not reset_cmd:
             raise ValueError(
-                "opencrl: pool=True requires a task.reset hook (a shell command "
-                "that restores the world to its initial state); none is set")
-        runner = PoolRunner(concurrency)
+                "opencrl: pool=True requires a reset hook — set Task.reset or "
+                "x-opencrl.reset in world.yml (a shell command that restores the "
+                "world to its initial state); none is set")
+        runner = PoolRunner(concurrency, reset=reset_cmd)
     else:
         runner = ThreadRunner(concurrency)
     return runner.run(task, models=models, backend=resolved, on_result=on_result)

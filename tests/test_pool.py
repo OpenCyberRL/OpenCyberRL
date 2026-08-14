@@ -57,3 +57,26 @@ def test_pool_requires_reset_hook():
                 caps=Caps(), max_steps=2, backend=MockBackend())   # no reset
     with pytest.raises(ValueError, match="reset"):
         run_batch(task, _model(), n=3, backend=MockBackend(), pool=True)
+
+
+def test_pool_reads_reset_from_world_metadata():
+    reset_calls = []
+
+    class W(MockWorld):
+        def exec(self, command, host=None):
+            if command == "RESET":
+                reset_calls.append(command)
+            return ""
+
+    class BE(MockBackend):
+        def up(self, spec, caps):
+            return W()
+
+    # reset declared only in world.yml metadata (x-opencrl.reset), not Task.reset
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), name="p",
+                caps=Caps(), max_steps=2, backend=BE(),
+                world={"x-opencrl": {"agent": "box", "reset": "RESET"},
+                       "services": {"box": {"image": "x"}}})
+    rs = run_batch(task, _model(), n=3, concurrency=1, backend=BE(), pool=True)
+    assert len(rs) == 3 and all(r.reward == 1.0 for r in rs)
+    assert len(reset_calls) == 2   # single pooled world reset between the 3 episodes
