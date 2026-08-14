@@ -105,3 +105,27 @@ def test_pool_propagates_worker_exception_and_tears_down():
     with pytest.raises(RuntimeError, match="model boom"):
         run_batch(task, boom, n=6, concurrency=2, backend=BE(), pool=True)
     assert downs and len(downs) == len(ups)   # every world that came up was torn down
+
+
+def test_pool_tears_down_all_worlds_even_if_one_down_fails():
+    downs = []
+
+    class W(MockWorld):
+        def exec(self, command, host=None):
+            return ""
+
+    class BE(MockBackend):
+        def up(self, spec, caps):
+            return W()
+
+        def down(self, world):
+            downs.append(1)
+            if len(downs) == 1:
+                raise RuntimeError("down boom")
+
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), name="p",
+                caps=Caps(), max_steps=2, backend=BE(), reset="RESET")
+    model = lambda m, t: {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+    with pytest.raises(RuntimeError, match="down boom"):
+        run_batch(task, model, n=6, concurrency=2, backend=BE(), pool=True)
+    assert len(downs) == 2   # both pooled worlds torn down despite the first failing

@@ -18,21 +18,29 @@ from opencrl.rollout import Rollout, _play, rollout
 from opencrl.task import Task, load_world
 
 
-def _resolve_models(model, model_factory, n: int) -> list:
-    """Exactly one of model (shared, must be concurrency-safe) or model_factory."""
+def _model_provider(model, model_factory) -> "Callable[[int], object]":
+    """Return a provider(i) -> model. Exactly one of `model` (shared across
+    rollouts; must be safe for concurrent calls, e.g. OpenAIModel) or
+    `model_factory` (a fresh instance per rollout, e.g. ScriptedModel).
+
+    A factory is called lazily, as each rollout starts, so at most the active
+    workers' models are ever live at once — n=100, concurrency=4 builds 4 at a
+    time, not 100 upfront.
+    """
     if (model is None) == (model_factory is None):
         raise ValueError(
             "opencrl: pass exactly one of model= (shared across rollouts; must be "
             "safe for concurrent calls, e.g. OpenAIModel) or model_factory= "
             "(called once per rollout for a fresh instance, e.g. ScriptedModel)")
     if model_factory is not None:
-        return [model_factory() for _ in range(n)]
-    return [model] * n
+        return lambda i: model_factory()
+    return lambda i: model
 
 
 class Runner(Protocol):
-    def run(self, task: Task, *, models: list, backend,
-            on_result: "Callable[[int, Rollout], None] | None" = None) -> list[Rollout]: ...
+    def run(self, task: Task, *, provider: "Callable[[int], object]", n: int,
+            backend, on_result: "Callable[[int, Rollout], None] | None" = None
+            ) -> list[Rollout]: ...
 
 
 class ThreadRunner:
@@ -41,10 +49,9 @@ class ThreadRunner:
     def __init__(self, concurrency: int | None = None):
         self.concurrency = concurrency
 
-    def run(self, task, *, models, backend, on_result=None) -> list[Rollout]:
-        n = len(models)
+    def run(self, task, *, provider, n, backend, on_result=None) -> list[Rollout]:
         workers = self.concurrency or min(n, os.cpu_count() or 1)
-        workers = max(1, min(workers, n)) if n else 1
+        workers = max(1, min(workers, n))
         results: list[Rollout | None] = [None] * n
         lock = threading.Lock()
         abort = threading.Event()  # first exception stops pending rollouts
@@ -53,7 +60,7 @@ class ThreadRunner:
             if abort.is_set():  # a prior rollout raised; skip (serial stop-on-first)
                 return
             try:
-                r = rollout(task, models[i], backend=backend)
+                r = rollout(task, provider(i), backend=backend)
                 if on_result is not None:
                     with lock:
                         on_result(i, r)
@@ -80,10 +87,9 @@ class PoolRunner:
         self.concurrency = concurrency
         self.reset = reset
 
-    def run(self, task, *, models, backend, on_result=None) -> list[Rollout]:
-        n = len(models)
+    def run(self, task, *, provider, n, backend, on_result=None) -> list[Rollout]:
         size = self.concurrency or min(n, os.cpu_count() or 1)
-        size = max(1, min(size, n)) if n else 1
+        size = max(1, min(size, n))
         results: list[Rollout | None] = [None] * n
         jobs: "Queue[int]" = Queue()
         for i in range(n):
@@ -91,7 +97,6 @@ class PoolRunner:
         lock = threading.Lock()
         worlds: list = []
         worlds_lock = threading.Lock()
-
         abort = threading.Event()            # first failure stops pending jobs
         errors: list[BaseException] = []
 
@@ -115,7 +120,7 @@ class PoolRunner:
                     if not first:
                         world.exec(self.reset)   # restore initial state between episodes
                     first = False
-                    r = _play(task, models[i], world)
+                    r = _play(task, provider(i), world)
                     if on_result is not None:
                         with lock:
                             on_result(i, r)
@@ -133,8 +138,11 @@ class PoolRunner:
             for t in threads:
                 t.join()
         finally:
-            for w in worlds:
-                backend.down(w)
+            for w in worlds:                 # tear down every world, even if one fails
+                try:
+                    backend.down(w)
+                except BaseException as e:
+                    errors.append(e)
         if errors:                           # match ThreadRunner: re-raise the first failure
             raise errors[0]
         return results  # type: ignore[return-value]
@@ -148,10 +156,12 @@ def run_batch(task: Task, model=None, *, model_factory=None, n: int,
 
     Resolves the backend ONCE (so a shared Docker instance can reuse built
     images) and prebuilds once before fan-out to avoid a thundering herd of
-    identical image builds. With pool=True (requires task.reset), keeps a small
-    pool of live worlds and resets between episodes instead of down/up.
+    identical image builds. With pool=True (Task.reset or x-opencrl.reset), keeps
+    a small pool of live worlds and resets between episodes instead of down/up.
     """
-    models = _resolve_models(model, model_factory, n)
+    provider = _model_provider(model, model_factory)   # validates model xor factory
+    if n <= 0:                                          # no work: never touch the backend
+        return []
     resolved = resolve_backend(backend or task.backend)
     world_spec = load_world(task)
     prebuild = getattr(resolved, "prebuild", None)
@@ -164,7 +174,7 @@ def run_batch(task: Task, model=None, *, model_factory=None, n: int,
                 "opencrl: pool=True requires a reset hook — set Task.reset or "
                 "x-opencrl.reset in world.yml (a shell command that restores the "
                 "world to its initial state); none is set")
-        runner = PoolRunner(concurrency, reset=reset_cmd)
+        runner: Runner = PoolRunner(concurrency, reset=reset_cmd)
     else:
         runner = ThreadRunner(concurrency)
-    return runner.run(task, models=models, backend=resolved, on_result=on_result)
+    return runner.run(task, provider=provider, n=n, backend=resolved, on_result=on_result)

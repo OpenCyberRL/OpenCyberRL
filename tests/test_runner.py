@@ -87,3 +87,34 @@ def test_run_batch_aborts_when_on_result_raises():
         run_batch(make_task(), _answer_model(), n=5, concurrency=1,
                   backend=BE(), on_result=bad)
     assert len(ups) == 1   # aborted after the first; remaining rollouts skip up()
+
+
+def test_run_batch_empty_skips_backend():
+    class BoomBackend(MockBackend):
+        def up(self, spec, caps):
+            raise AssertionError("empty batch must not touch the backend")
+        def prebuild(self, spec, caps):
+            raise AssertionError("empty batch must not prebuild")
+    assert run_batch(make_task(), _answer_model(), n=0, backend=BoomBackend()) == []
+
+
+def test_run_batch_instantiates_models_lazily():
+    live = 0
+    max_live = 0
+    lock = threading.Lock()
+
+    def factory():
+        nonlocal live, max_live
+        with lock:
+            live += 1
+            max_live = max(max_live, live)
+        return _answer_model()
+
+    def on_result(i, r):
+        nonlocal live
+        with lock:
+            live -= 1
+
+    run_batch(make_task(), model_factory=factory, n=8, concurrency=2,
+              backend=MockBackend(), on_result=on_result)
+    assert max_live <= 2   # eager pre-instantiation would reach 8
