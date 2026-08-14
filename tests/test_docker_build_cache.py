@@ -72,3 +72,11 @@ def test_docker_is_picklable():
     with be2._built_lock:            # recreated lock is usable
         pass
     assert be2._built == {"opencrl-build-abc"}
+
+
+def test_pin_build_images_distinguishes_by_platform():
+    a = {"services": {"x": {"build": "/c", "platform": "linux/amd64"}}}
+    b = {"services": {"x": {"build": "/c", "platform": "linux/arm64"}}}
+    _pin_build_images(a)
+    _pin_build_images(b)
+    assert a["services"]["x"]["image"] != b["services"]["x"]["image"]

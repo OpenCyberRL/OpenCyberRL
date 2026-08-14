@@ -45,13 +45,16 @@ def _pin_build_images(doc: dict) -> list[str]:
         build = svc.get("build")
         if not build:
             continue
-        # Hash the full effective build config so target / dockerfile_inline /
-        # additional_contexts / args all change the tag — otherwise two services
-        # differing only by `target` collide on one image tag and overwrite it.
+        # Hash the full effective build config PLUS the service-level `platform`
+        # (which lives outside `build:` but selects the build architecture) so
+        # target / dockerfile_inline / additional_contexts / args / platform all
+        # change the tag — otherwise two services differing only by one of those
+        # collide on a single image tag and overwrite it.
+        platform = str(svc.get("platform", ""))
         if isinstance(build, str):
-            key = build
+            key = f"{platform}|{build}"
         else:
-            key = json.dumps(build, sort_keys=True, default=str)
+            key = platform + "|" + json.dumps(build, sort_keys=True, default=str)
         tag = "opencrl-build-" + hashlib.sha256(key.encode()).hexdigest()[:12]
         svc.setdefault("image", tag)
         tags.append(svc["image"])
