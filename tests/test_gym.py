@@ -122,3 +122,15 @@ def test_gym_reset_nulls_world_before_up_so_no_double_teardown():
         pass
     env.close()
     assert down_count[0] == 1
+
+
+def test_to_gym_vector_builds_n_envs():
+    from opencrl.adapters.gym import to_gym_vector
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), max_steps=5)
+    venv = to_gym_vector(task, num_envs=3, backend=MockBackend())
+    try:
+        assert venv.num_envs == 3
+        obs, infos = venv.reset()
+        assert len(obs) == 3
+    finally:
+        venv.close()

@@ -10,7 +10,7 @@ from opencrl.rollout import Episode
 from opencrl.task import Task, load_world
 
 
-def to_gym(task: Task, backend=None):
+def to_gym(task: Task, backend=None, _resolved_backend=None):
     import gymnasium as gym
 
     class _MessageSpace(gym.spaces.Space):
@@ -34,7 +34,7 @@ def to_gym(task: Task, backend=None):
     class OpencrlEnv(gym.Env):
         def __init__(self):
             self._task = task
-            self._backend = resolve_backend(backend or task.backend)
+            self._backend = _resolved_backend or resolve_backend(backend or task.backend)
             self._episode = None
             self._world = None
             self._steps = 0
@@ -78,3 +78,16 @@ def to_gym(task: Task, backend=None):
                 self._world = None
 
     return OpencrlEnv()
+
+
+def to_gym_vector(task: Task, num_envs: int, backend=None, async_mode: bool = False):
+    """A Gymnasium vector env of `num_envs` OpencrlEnvs sharing ONE resolved
+    backend, so build-once applies across the batch (no per-env herd build)."""
+    import gymnasium as gym
+    resolved = resolve_backend(backend or task.backend)
+    prebuild = getattr(resolved, "prebuild", None)
+    if prebuild is not None:
+        prebuild(load_world(task), task.caps)
+    make = lambda: to_gym(task, _resolved_backend=resolved)
+    VecCls = gym.vector.AsyncVectorEnv if async_mode else gym.vector.SyncVectorEnv
+    return VecCls([make for _ in range(num_envs)])
