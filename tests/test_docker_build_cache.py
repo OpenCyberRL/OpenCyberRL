@@ -122,3 +122,35 @@ def test_pin_build_images_treats_empty_mapping_as_build():
     d = {"services": {"x": {"build": {}}}}
     ids = _pin_build_images(d, "/task")
     assert ids and d["services"]["x"]["image"].startswith("opencrl-build-")
+
+
+def test_pin_build_images_rewrites_shared_image_consumers():
+    # Service 'builder' builds into image: shared:latest; service 'consumer'
+    # references the same tag. The override must rewrite the consumer too,
+    # or it would pull a stale/missing image instead of the built one.
+    doc = {"services": {
+        "builder": {"build": "/ctx", "image": "shared:latest"},
+        "consumer": {"image": "shared:latest"},
+    }}
+    _pin_build_images(doc)
+    builder_img = doc["services"]["builder"]["image"]
+    consumer_img = doc["services"]["consumer"]["image"]
+    assert builder_img.startswith("opencrl-build-")
+    assert consumer_img == builder_img   # rewritten to match the built tag
+
+
+def test_pin_build_images_resolves_interpolation_in_digest(monkeypatch):
+    monkeypatch.setenv("VERSION", "1.0")
+    a = {"services": {"x": {"build": {"context": "/c", "args": {"V": "${VERSION}"}}}}}
+    _pin_build_images(a, "/task")
+    monkeypatch.setenv("VERSION", "2.0")
+    b = {"services": {"x": {"build": {"context": "/c", "args": {"V": "${VERSION}"}}}}}
+    _pin_build_images(b, "/task")
+    assert a["services"]["x"]["image"] != b["services"]["x"]["image"]
+
+
+def test_pin_build_images_resolves_default_interpolation(monkeypatch):
+    monkeypatch.delenv("MISSING_VAR", raising=False)
+    a = {"services": {"x": {"build": {"context": "/c", "args": {"V": "${MISSING_VAR:-fallback}"}}}}}
+    _pin_build_images(a, "/task")
+    assert a["services"]["x"]["image"].startswith("opencrl-build-")

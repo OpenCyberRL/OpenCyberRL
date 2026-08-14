@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -33,20 +34,51 @@ def _run(args: list[str], timeout: float | None = None) -> subprocess.CompletedP
                           errors="replace", timeout=timeout)
 
 
+_INTERP_BRACE = re.compile(r'\$\{([^}]*)\}')
+
+
+def _expand_vars(text: str) -> str:
+    """Resolve Compose-style interpolation (${VAR}, ${VAR:-default},
+    ${VAR-default}, ${VAR:?err}, $VAR) to effective values for cache identity
+    hashing. Compose applies these at runtime; hashing the raw placeholder
+    would alias builds that differ only in resolved arg values."""
+    text = text.replace("$$", "\x00")   # preserve Compose's literal-$$
+    def repl_brace(m):
+        inner = m.group(1)
+        for sep in (":-", "-", ":?", "?"):
+            idx = inner.find(sep)
+            if idx >= 0:
+                name = inner[:idx].strip()
+                default = inner[idx + len(sep):]
+                val = os.environ.get(name)
+                return val if val else default
+        return os.environ.get(inner.strip(), "")
+    text = _INTERP_BRACE.sub(repl_brace, text)
+    text = re.sub(r'\$([A-Za-z_][A-Za-z0-9_]*)',
+                  lambda m: os.environ.get(m.group(1), ""), text)
+    return text.replace("\x00", "$")
+
+
 def _pin_build_images(doc: dict, basedir: str = "") -> list[str]:
     """Override every `build:` service's image with a deterministic,
     content-addressed tag and return the per-service build identities (digests).
 
-    The digest covers `basedir` (Compose resolves an omitted build context to the
-    project directory), the service `platform` (outside `build:`, selects the
-    architecture), and the full effective build config — so distinct build inputs
-    never collide on a tag. Overriding (not defaulting) the image means an
-    explicit `image:` shared across different build configs can't alias, which
-    removes any need for ownership bookkeeping or shared-tag locking. Services
-    with no `build:` key are untouched.
+    The digest covers `basedir` (Compose resolves an omitted build context to
+    the project directory), the service `platform` (outside `build:`, selects
+    the architecture), and the full effective build config — with Compose
+    interpolation (${VAR}, ${VAR:-default}) resolved against the environment —
+    so distinct or re-parameterized build inputs never collide on a tag.
+    Overriding (not defaulting) the image means an explicit `image:` shared
+    across different build configs can't alias, which removes any need for
+    ownership bookkeeping or shared-tag locking. Any non-build service that
+    references an overridden image is rewritten to the new tag, preserving
+    Compose image-sharing semantics. Services with no `build:` key are
+    untouched.
     """
+    services = doc.get("services") or {}
+    rewrites: dict[str, str] = {}   # original image -> new content-addressed tag
     identities: list[str] = []
-    for svc in (doc.get("services") or {}).values():
+    for svc in services.values():
         if "build" not in svc:
             continue
         build = svc["build"]
@@ -55,9 +87,21 @@ def _pin_build_images(doc: dict, basedir: str = "") -> list[str]:
             build_key = build
         else:
             build_key = json.dumps(build or {}, sort_keys=True, default=str)
+        build_key = _expand_vars(build_key)
         digest = hashlib.sha256(f"{basedir}|{platform}|{build_key}".encode()).hexdigest()[:12]
-        svc["image"] = f"opencrl-build-{digest}"     # unique per build config
+        new_tag = f"opencrl-build-{digest}"
+        original = svc.get("image")
+        if original:
+            rewrites[original] = new_tag
+        svc["image"] = new_tag
         identities.append(digest)
+    # Rewrite consumers of an overridden image so they run the built image,
+    # not a stale pull of the original tag.
+    if rewrites:
+        for svc in services.values():
+            img = svc.get("image")
+            if img in rewrites:
+                svc["image"] = rewrites[img]
     return identities
 
 

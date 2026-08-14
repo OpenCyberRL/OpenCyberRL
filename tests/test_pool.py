@@ -59,6 +59,22 @@ def test_pool_requires_reset_hook():
         run_batch(task, _model(), n=3, backend=MockBackend(), pool=True)
 
 
+def test_pool_requires_reset_hook_before_prebuild():
+    # pool=True without a reset hook must raise BEFORE prebuild runs, so a
+    # Docker backend doesn't waste an expensive image build on a doomed config.
+    prebuilds = []
+
+    class BE(MockBackend):
+        def prebuild(self, spec, caps):
+            prebuilds.append(spec)
+
+    task = Task(goal="g", reward=flag("CTF{win}"), tools=(shell,), name="p",
+                caps=Caps(), max_steps=2, backend=BE())   # no reset
+    with pytest.raises(ValueError, match="reset"):
+        run_batch(task, _model(), n=3, backend=BE(), pool=True)
+    assert prebuilds == []   # prebuild never ran
+
+
 def test_pool_reads_reset_from_world_metadata():
     reset_calls = []
 

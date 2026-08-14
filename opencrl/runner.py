@@ -172,9 +172,10 @@ def run_batch(task: Task, model=None, *, model_factory=None, n: int,
         return []
     resolved = resolve_backend(backend or task.backend)
     world_spec = load_world(task)
-    prebuild = getattr(resolved, "prebuild", None)
-    if prebuild is not None:
-        prebuild(world_spec, task.caps)
+    # Validate the pool reset hook BEFORE prebuilding — prebuild can trigger
+    # an expensive, side-effecting Docker build, and pool=True without a reset
+    # hook is a user error that should fail fast before any build runs.
+    reset_cmd = None
     if pool:
         reset_cmd = task.reset or (world_spec.get("x-opencrl") or {}).get("reset")
         if not reset_cmd:
@@ -182,6 +183,10 @@ def run_batch(task: Task, model=None, *, model_factory=None, n: int,
                 "opencrl: pool=True requires a reset hook — set Task.reset or "
                 "x-opencrl.reset in world.yml (a shell command that restores the "
                 "world to its initial state); none is set")
+    prebuild = getattr(resolved, "prebuild", None)
+    if prebuild is not None:
+        prebuild(world_spec, task.caps)
+    if pool:
         runner: Runner = PoolRunner(concurrency, reset=reset_cmd)
     else:
         runner = ThreadRunner(concurrency)
