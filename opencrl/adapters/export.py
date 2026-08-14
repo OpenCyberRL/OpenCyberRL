@@ -2,19 +2,22 @@
 from __future__ import annotations
 
 from opencrl.adapters._common import _extract_prompt, _extract_completion, _extract_assistant_only
-from opencrl.rollout import Rollout, rollout
+from opencrl.rollout import Rollout
+from opencrl.runner import run_batch
 from opencrl.task import Task
 
 
-def export_rollouts(task: Task, model, n: int = 16, backend=None,
-                   fmt: str = "dpo") -> "Dataset":
+def export_rollouts(task: Task, model=None, *, model_factory=None, n: int = 16,
+                    backend=None, fmt: str = "dpo",
+                    concurrency: int | None = None) -> "Dataset":
     """Run N rollouts and export as a HuggingFace Dataset.
 
     fmt: "dpo"  -> {prompt, chosen, rejected} preference pairs
           "sft"  -> {prompt, completion} high-reward trajectories
           "kto"  -> {prompt, completion, label} unpaired preferences
     """
-    rollouts = [rollout(task, model, backend=backend) for _ in range(n)]
+    rollouts = run_batch(task, model, model_factory=model_factory, n=n,
+                         concurrency=concurrency, backend=backend)
     if fmt == "dpo":
         return _to_dpo(task, rollouts)
     elif fmt == "sft":

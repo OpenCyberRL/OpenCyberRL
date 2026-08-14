@@ -165,3 +165,10 @@ def test_export_dpo_completion_is_assistant_only():
     chosen = ds[0]["chosen"]
     for msg in chosen:
         assert msg["role"] == "assistant"
+
+
+def test_export_rollouts_concurrent():
+    model = lambda m, t: {"role": "assistant", "content": "CTF{win}", "tool_calls": None}
+    ds = export_rollouts(make_task(), model, n=4, backend=MockBackend(),
+                         fmt="kto", concurrency=4)
+    assert len(ds) == 4
