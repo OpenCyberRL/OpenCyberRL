@@ -225,14 +225,22 @@ def _cmd_list(args) -> int:
     console = _console()
     discover(args.path)
     tasks = list_tasks()
-    if not tasks:
-        _error(console, "No tasks found.",
-               hint="Install community modules with: [bold]opencrl install[/bold]")
-        return 0
 
     # Group tasks by source (local vs module)
     from opencrl import modules
     active = modules.active_modules() if modules.is_cloned() else []
+
+    # Optional module filter: show only that module's tasks
+    selected = getattr(args, "module", None)
+    if selected is not None and selected not in ["local"] + active:
+        _error(console, f"Unknown module '{selected}'.",
+               hint="Available: " + ", ".join(["local"] + active))
+        return 1
+
+    if not tasks:
+        _error(console, "No tasks found.",
+               hint="Install community modules with: [bold]opencrl install[/bold]")
+        return 0
 
     # Determine source for each task
     local_tasks = []
@@ -256,6 +264,18 @@ def _cmd_list(args) -> int:
         if not found:
             # Unknown source — put in a misc bucket
             module_tasks.setdefault("other", []).append(name)
+
+    # Apply the module filter to the grouped tasks
+    if selected == "local":
+        module_tasks = {}
+    elif selected is not None:
+        local_tasks = []
+        module_tasks = {selected: module_tasks.get(selected, [])}
+
+    total = len(local_tasks) + sum(len(names) for names in module_tasks.values())
+    if not total:
+        _error(console, f"No tasks found in module '{selected}'.")
+        return 0
 
     # Build a tree view
     tree = Tree("[bold cyan]Tasks[/bold cyan]", guide_style="dim")
@@ -281,7 +301,7 @@ def _cmd_list(args) -> int:
             mod_branch.add(f"[green]{name}[/green] {caps} [dim]— {desc}[/dim]")
 
     console.print(tree)
-    console.print(f"\n[dim]{len(tasks)} task(s) found[/dim]")
+    console.print(f"\n[dim]{total} task(s) found[/dim]")
     return 0
 
 
@@ -369,7 +389,7 @@ def main(argv=None) -> int:
             "  install <module>     Activate a module\n"
             "  uninstall <module>   Deactivate a module\n"
             "  update               Pull latest modules\n"
-            "  list                 List all discovered tasks\n"
+            "  list [module]        List tasks (all, or one module's / local)\n"
             "  info <task>          Show task details\n"
             "  new <name>           Scaffold a new task\n"
         ),
@@ -388,7 +408,10 @@ def main(argv=None) -> int:
     un.set_defaults(fn=_cmd_uninstall)
 
     sub.add_parser("update", help="pull latest modules").set_defaults(fn=_cmd_update)
-    sub.add_parser("list", help="list discovered tasks").set_defaults(fn=_cmd_list)
+    lst = sub.add_parser("list", help="list discovered tasks")
+    lst.add_argument("module", nargs="?", default=None,
+                     help="only show this module's tasks ('local' for ./tasks/)")
+    lst.set_defaults(fn=_cmd_list)
 
     info = sub.add_parser("info", help="show task details")
     info.add_argument("name", help="task name")
