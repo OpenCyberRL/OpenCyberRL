@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from queue import Empty, Queue
 from typing import Callable, Protocol
@@ -74,6 +75,21 @@ class ThreadRunner:
             for f in futures:
                 f.result()
         return results  # type: ignore[return-value]
+
+def _pool_reset_hook(task: "Task", world_spec: dict) -> "str | None":
+    """A task's pool reset hook: Task.reset, else x-opencrl.reset metadata."""
+    return task.reset or (world_spec.get("x-opencrl") or {}).get("reset")
+
+
+def _require_pool_reset(task: "Task", world_spec: dict) -> str:
+    """Return the reset hook or raise — pooling without one silently corrupts scoring."""
+    reset_cmd = _pool_reset_hook(task, world_spec)
+    if not reset_cmd:
+        raise ValueError(
+            "opencrl: pool=True requires a reset hook — set Task.reset or "
+            "x-opencrl.reset in world.yml (a shell command that restores the "
+            "world to its initial state); none is set")
+    return reset_cmd
 
 
 class PoolRunner:
@@ -177,12 +193,7 @@ def run_batch(task: Task, model=None, *, model_factory=None, n: int,
     # hook is a user error that should fail fast before any build runs.
     reset_cmd = None
     if pool:
-        reset_cmd = task.reset or (world_spec.get("x-opencrl") or {}).get("reset")
-        if not reset_cmd:
-            raise ValueError(
-                "opencrl: pool=True requires a reset hook — set Task.reset or "
-                "x-opencrl.reset in world.yml (a shell command that restores the "
-                "world to its initial state); none is set")
+        reset_cmd = _require_pool_reset(task, world_spec)
     prebuild = getattr(resolved, "prebuild", None)
     if prebuild is not None:
         prebuild(world_spec, task.caps)
@@ -191,3 +202,318 @@ def run_batch(task: Task, model=None, *, model_factory=None, n: int,
     else:
         runner = ThreadRunner(concurrency)
     return runner.run(task, provider=provider, n=n, backend=resolved, on_result=on_result)
+
+
+class GroupPool:
+    """Persistent worlds shared across a task group; LRU eviction of idle worlds.
+
+    draw(task) checks a world out for one episode: a warm idle world for the
+    task runs its reset hook and is reused; a cold task is brought up via
+    backend.up, evicting the least-recently-used idle world once `capacity`
+    worlds are live. A checked-out world is in flight and is NEVER evicted —
+    the hard invariant (note: close() is not eviction; it tears down every
+    live world, checked-out ones included, and owns all teardown afterwards).
+    release() returns it as most-recently-used idle; discard() tears it down
+    instead (a failed episode's world must not be reused). Every task needs
+    a reset hook (Task.reset or x-opencrl.reset).
+    """
+
+    def __init__(self, backend, capacity: int):
+        if capacity < 1:
+            raise ValueError(
+                f"opencrl: group pool capacity must be >= 1, got {capacity}")
+        self._backend = backend
+        self._capacity = capacity
+        self._cond = threading.Condition()
+        # world -> (task id, reset hook); idle is LRU-ordered (oldest first).
+        self._idle: "OrderedDict[object, tuple[int, str]]" = OrderedDict()
+        self._inflight: dict[object, tuple[int, str]] = {}
+        self._reserved = 0                  # bring-ups in progress, counted as live
+        self._entries: dict[int, tuple] = {}  # task id -> (task, world spec, reset hook)
+        self._closed = False
+
+    def draw(self, task):
+        """Check out a world for one episode on `task` (see class docstring)."""
+        task_obj, spec, reset_cmd = self.entry(task)
+        world = victim = None
+        with self._cond:
+            while True:
+                self._check_open()
+                world = self._warm(id(task))
+                if world is not None:
+                    break
+                live = len(self._idle) + len(self._inflight) + self._reserved
+                if live < self._capacity:
+                    self._reserved += 1
+                    break
+                if self._idle:             # full, but an idle world can go
+                    victim, _ = self._idle.popitem(last=False)
+                    self._reserved += 1
+                    break
+                self._cond.wait()          # every live world is in flight
+        if world is not None:              # warm: restore initial state, reuse
+            try:
+                world.exec(reset_cmd)
+            except BaseException:
+                self.discard(world)        # drop the poisoned world; report the reset failure
+                raise
+            return world
+        if victim is not None:             # cold: make room, then bring up
+            try:
+                self._backend.down(victim)
+            except BaseException:
+                self._unreserve()
+                raise
+        try:
+            world = self._backend.up(spec, task_obj.caps)
+        except BaseException:
+            self._unreserve()
+            raise
+        stale = False
+        with self._cond:
+            self._reserved -= 1
+            stale = self._closed           # close() raced this bring-up
+            if not stale:
+                self._inflight[world] = (id(task_obj), reset_cmd)
+        if stale:
+            self._backend.down(world)
+            raise RuntimeError("opencrl: group pool closed during bring-up")
+        return world
+
+    def release(self, world) -> None:
+        """Return a checked-out world to the pool as most-recently-used idle.
+
+        A no-op once the pool is closed: close() owns teardown from then on
+        and has already downed every live world — downing again would be a
+        double teardown.
+        """
+        with self._cond:
+            if self._closed:            # close() already tore this world down
+                return
+            lease = self._inflight.pop(world, None)
+            if lease is None:
+                raise ValueError(
+                    "opencrl: release() on a world that is not checked out")
+            self._idle[world] = lease
+            self._cond.notify_all()     # a blocked draw may now proceed
+
+    def discard(self, world) -> None:
+        """Drop a checked-out world and tear it down (best effort).
+
+        For worlds whose episode failed: unlike release() the world never
+        returns to idle (a contaminated world must not be reused), and a
+        failing down() is swallowed so it cannot mask the episode error.
+        A no-op once the pool is closed: close() owns teardown from then on.
+        """
+        with self._cond:
+            self._inflight.pop(world, None)
+            closed = self._closed
+            self._cond.notify_all()     # live count dropped: wake blocked draws
+        if closed:                      # close() already tore this world down
+            return
+        try:
+            self._backend.down(world)
+        except BaseException:
+            pass
+
+    def close(self) -> None:
+        """Tear down every live world, idle or in flight; raise the first failure.
+
+        Idempotent. Does NOT wait for in-flight episodes: call it only after
+        every draw/release/discard has returned (run_group guarantees this by
+        joining its workers before closing). Afterwards every live world has
+        been downed exactly once and release()/discard() are no-ops.
+        """
+        with self._cond:
+            if self._closed:
+                return
+            self._closed = True
+            worlds = list(self._idle) + list(self._inflight)
+            self._idle.clear()
+            self._inflight.clear()
+            self._cond.notify_all()     # wake blocked draws (they will raise)
+        errors: list[BaseException] = []
+        for w in worlds:                # tear down every world, even if one fails
+            try:
+                self._backend.down(w)
+            except BaseException as e:
+                errors.append(e)
+        if errors:
+            raise errors[0]
+
+    def entry(self, task):
+        """(task, world spec, reset hook) for a task, cached; validates the hook.
+
+        Public so callers like run_group can validate hooks and prebuild
+        before any world comes up. Concurrent first calls may race the cache;
+        the recomputed entry is identical, so the benign overwrite needs no
+        lock (load_world is file I/O and stays off the pool lock).
+        """
+        cached = self._entries.get(id(task))
+        if cached is None:
+            spec = load_world(task)
+            cached = (task, spec, _require_pool_reset(task, spec))
+            self._entries[id(task)] = cached
+        return cached
+
+    def _warm(self, key: int):
+        """Pop an idle world for task `key`, marking it in flight."""
+        found = None
+        for world, lease in self._idle.items():
+            if lease[0] == key:
+                found = (world, lease)
+                break
+        if found is None:
+            return None
+        del self._idle[found[0]]        # mutate only after the scan ends
+        self._inflight[found[0]] = found[1]
+        return found[0]
+
+    def _unreserve(self) -> None:
+        """Release a failed bring-up's reservation and wake blocked draws."""
+        with self._cond:
+            self._reserved -= 1
+            self._cond.notify_all()
+
+    def _check_open(self) -> None:
+        """Raise if the pool has been closed."""
+        if self._closed:
+            raise RuntimeError("opencrl: group pool is closed")
+
+
+def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
+              concurrency: int | None = None, backend=None,
+              on_result: "Callable[[int, Rollout], None] | None" = None,
+              on_error: "Callable[[Task, BaseException], None] | None" = None,
+              capacity: int | None = None) -> list[Rollout]:
+    """Run `episodes` rollouts per task over a task group on one shared pool.
+
+    Worlds persist across the group's tasks: a warm idle world for a task is
+    reset and reused; a cold task is brought up, evicting the LRU idle world
+    once `capacity` worlds are live (default: one per worker, so draws never
+    wait). The group shares one backend (the `backend` arg, else the first
+    task's). Returns Rollouts in submission order — task order, then episode
+    order. Every task needs a reset hook (Task.reset or x-opencrl.reset),
+    validated before any prebuild runs.
+
+    on_error switches the run to failure tolerance (opencrl.warm's posture):
+    a task that fails — at hook validation, prebuild, bring-up, rollout, or
+    scoring — is reported once as (task, exception), its remaining episodes
+    are skipped, and the group runs on; failed episodes leave None holes in
+    the returned list. Default (None): the first failure aborts pending jobs
+    and re-raises, matching run_batch.
+    """
+    tasks = list(tasks)
+    provider = _model_provider(model, model_factory)   # validates model xor factory
+    if capacity is not None and capacity < 1:
+        raise ValueError(
+            f"opencrl: group pool capacity must be >= 1, got {capacity}")
+    jobs = [(t, e) for t in tasks for e in range(episodes)]
+    if not jobs:                                       # no work: never touch the backend
+        return []
+    resolved = resolve_backend(backend or tasks[0].backend)
+    size = concurrency or min(len(jobs), os.cpu_count() or 1)
+    size = max(1, min(size, len(jobs)))
+    pool = GroupPool(resolved, capacity or size)
+    lock = threading.Lock()
+    failed: set[int] = set()         # tolerant mode only: reported task ids
+    abort = threading.Event()        # first failure stops pending jobs
+    errors: list[BaseException] = []
+
+    def _tolerated(task_obj, exc: BaseException) -> bool:
+        """Report `exc` for `task_obj` in tolerant mode; mark it dead.
+
+        The first failure claims the report (marking the task dead before
+        calling back), so concurrent episodes of an already-failing task see
+        it dead and fail silently: on_error fires exactly once per task. A
+        callback that raises is fatal — recorded and re-raised by run_group
+        — never swallowed or allowed to kill a worker mid-report.
+        """
+        if on_error is None:
+            return False
+        with lock:
+            if id(task_obj) in failed:
+                return True          # collateral of an already-reported failure
+            failed.add(id(task_obj))
+            try:
+                on_error(task_obj, exc)
+            except BaseException as cb_err:
+                errors.append(cb_err)
+                abort.set()
+        return True
+
+    # Validate reset hooks + load specs before prebuild; dict dedupes tasks.
+    entries: dict[int, tuple] = {}
+    for t in tasks:
+        try:
+            entries[id(t)] = pool.entry(t)
+        except BaseException as e:
+            if not _tolerated(t, e):
+                raise
+    prebuild = getattr(resolved, "prebuild", None)
+    if prebuild is not None:           # prebuild each distinct task once, not per episode
+        for task_obj, spec, _reset in list(entries.values()):
+            try:
+                prebuild(spec, task_obj.caps)
+            except BaseException as e:
+                if not _tolerated(task_obj, e):
+                    raise
+                del entries[id(task_obj)]
+    results: list[Rollout | None] = [None] * len(jobs)
+    jobs_q: "Queue[int]" = Queue()
+    for i in range(len(jobs)):
+        jobs_q.put(i)
+
+    def worker() -> None:
+        while not abort.is_set():
+            try:
+                i = jobs_q.get_nowait()
+            except Empty:
+                return
+            task = jobs[i][0]
+            with lock:
+                dead = id(task) in failed
+            if dead:                   # tolerant mode: the task already failed
+                continue
+            world = None
+            try:
+                world = pool.draw(task)
+                r = _play(task, provider(i), world)
+                pool.release(world)    # idle again: evictable, reusable
+                world = None
+                if on_result is not None:
+                    with lock:
+                        on_result(i, r)
+                results[i] = r
+            except BaseException as e:  # draw / _play / on_result failure
+                if world is not None:
+                    pool.discard(world)  # tear the failed world down; wake blocked draws
+                if _tolerated(task, e):  # tolerant mode: report and move on
+                    continue
+                with lock:
+                    errors.append(e)
+                abort.set()
+                return
+
+    threads = [threading.Thread(target=worker) for _ in range(size)]
+    started: list = []
+    try:
+        for t in threads:
+            t.start()
+            started.append(t)
+        for t in started:
+            t.join()
+    finally:
+        # Even on interruption (Ctrl-C during join) or a failed start, stop
+        # workers pulling new jobs and let every started worker finish before
+        # tearing worlds down — never down() a world under an active rollout.
+        abort.set()
+        for t in started:
+            t.join()
+        try:
+            pool.close()               # every live world downed, even after failure
+        except BaseException as e:
+            errors.append(e)
+    if errors:                         # match run_batch: re-raise the first failure
+        raise errors[0]
+    return results  # type: ignore[return-value]

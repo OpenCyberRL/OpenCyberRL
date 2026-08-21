@@ -63,13 +63,41 @@ uv run opencrl new mytask
 Creates `tasks/mytask/task.py` and `tasks/mytask/world.yml` in the local
 `tasks/` directory. Refuses to overwrite an existing task.
 
+### `run`: run a task group through the persistent pool
+
+```bash
+uv run opencrl run cybergym/level1 -n 4 -o rollouts.jsonl -m gpt-4o-mini
+```
+
+Resolves a group expression (or several) — same syntax as `opencrl warm` —
+and runs every resolved task through one shared world pool: warm worlds are
+reset and reused between episodes, cold tasks are brought up under the
+pool's eviction policy. Writes one `Rollout` per episode to the JSONL file
+(including the per-stage score breakdown). A task that fails is reported and
+skipped; the rest of the group still runs. Exit codes match `warm`: 0 all
+episodes ran, 1 a task failed, 2 the group expression could not be resolved.
+
+The model id comes from `--model` or `$OPENCRL_MODEL` and is passed to the
+OpenAI-compatible chat API (requires the `openai` extra). The equivalent
+Python entry point is `run_group_eval()`:
+
+```python
+from opencrl import discover, run_group_eval, OpenAIModel
+
+discover()
+result = run_group_eval("cybergym/level1", OpenAIModel("gpt-4o-mini"),
+                        episodes=4, output="rollouts.jsonl")
+for outcome in result.outcomes:
+    print(outcome.task, len(outcome.rollouts), outcome.error)
+```
+
 ## Options
 
 | Option | Commands | Meaning |
 |---|---|---|
-| `--path` | `list` | Override task discovery path. Defaults to auto-discover (local `tasks/` + active modules). |
+| `--path` | `list`, `warm`, `run` | Override task discovery path. Defaults to auto-discover (local `tasks/` + active modules). |
 
-## Running tasks
+## Running single tasks
 
 The CLI handles discovery and module management. To run a task, use the
 Python API:

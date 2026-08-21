@@ -1,8 +1,9 @@
-"""opencrl CLI: install | uninstall | update | list | info | new."""
+"""opencrl CLI: install | uninstall | update | list | info | new | warm | run."""
 from __future__ import annotations
 
 import argparse
 import keyword
+import os
 import sys
 from pathlib import Path
 
@@ -225,14 +226,23 @@ def _cmd_list(args) -> int:
     console = _console()
     discover(args.path)
     tasks = list_tasks()
-    if not tasks:
-        _error(console, "No tasks found.",
-               hint="Install community modules with: [bold]opencrl install[/bold]")
-        return 0
 
     # Group tasks by source (local vs module)
     from opencrl import modules
     active = modules.active_modules() if modules.is_cloned() else []
+
+    # Optional module filter: show only that module's tasks
+    choices = ["local"] + active
+    selected = args.module
+    if selected is not None and selected not in choices:
+        _error(console, f"Unknown module '{selected}'.",
+               hint="Available: " + ", ".join(choices))
+        return 1
+
+    if not tasks:
+        _error(console, "No tasks found.",
+               hint="Install community modules with: [bold]opencrl install[/bold]")
+        return 0
 
     # Determine source for each task
     local_tasks = []
@@ -256,6 +266,18 @@ def _cmd_list(args) -> int:
         if not found:
             # Unknown source — put in a misc bucket
             module_tasks.setdefault("other", []).append(name)
+
+    # Apply the module filter to the grouped tasks
+    if selected == "local":
+        module_tasks = {}
+    elif selected is not None:
+        local_tasks = []
+        module_tasks = {selected: module_tasks.get(selected, [])}
+
+    total = len(local_tasks) + sum(len(names) for names in module_tasks.values())
+    if not total:
+        _error(console, f"No tasks found in module '{selected}'.")
+        return 0
 
     # Build a tree view
     tree = Tree("[bold cyan]Tasks[/bold cyan]", guide_style="dim")
@@ -281,7 +303,7 @@ def _cmd_list(args) -> int:
             mod_branch.add(f"[green]{name}[/green] {caps} [dim]— {desc}[/dim]")
 
     console.print(tree)
-    console.print(f"\n[dim]{len(tasks)} task(s) found[/dim]")
+    console.print(f"\n[dim]{total} task(s) found[/dim]")
     return 0
 
 
@@ -355,6 +377,117 @@ def _cmd_new(args) -> int:
                   f"  [bold]python -c \"from opencrl import discover, get_task, rollout; discover(); print(rollout(get_task('{args.name}'), model))\"[/bold]")
     return 0
 
+# ── warm ──────────────────────────────────────────────────────────────────
+
+_WARM_STYLES = {"built": "green", "cached": "cyan",
+                "no-build": "dim", "skipped": "yellow", "failed": "red"}
+
+
+def _warm_line(result) -> str:
+    """One rich-formatted progress line for a warmed task."""
+    from rich.markup import escape
+    style = _WARM_STYLES.get(result.status, "white")
+    line = f"  [{style}]{result.status}[/{style}] {result.name}"
+    if result.error:
+        line += f" [dim]— {escape(result.error)}[/dim]"
+    return line
+
+
+def _cmd_warm(args) -> int:
+    from rich.markup import escape
+
+    from opencrl import warm
+    from opencrl.backends.docker import Docker
+
+    console = _console()
+    try:
+        index = warm.build_index(args.path)
+    except Exception as exc:
+        _error(console, f"Task discovery failed: {exc}")
+        return 1
+    # Exit codes (deliberately richer than sibling commands' flat 1):
+    # 0 = everything built/cached, 1 = a build failed, 2 = a group
+    # expression could not be resolved. Each argument resolves independently
+    # — filters and bare task names may be freely mixed.
+    backend = Docker()
+    report = lambda r: console.print(_warm_line(r))
+    results = []
+    try:
+        for expr in args.group:
+            results.extend(warm.warm_group(expr, index, backend, report=report))
+    except ValueError as exc:
+        _error(console, str(exc))
+        return 2
+    console.print(f"\n[dim]{warm.summarize(results)}[/dim]")
+    failed = [r for r in results if r.status == "failed"]
+    if failed:
+        detail = "\n".join(f"  {r.name}: {escape(r.error)}" for r in failed)
+        _error(console, f"{len(failed)} task(s) failed to build:\n{detail}")
+        return 1
+    return 0
+
+
+# ── run ───────────────────────────────────────────────────────────────────
+
+def _run_line(outcome) -> str:
+    """One rich-formatted result line for a run task."""
+    from rich.markup import escape
+    if outcome.error:
+        return f"  [red]failed[/red] {outcome.task} [dim]— {escape(outcome.error)}[/dim]"
+    return f"  [green]ok[/green] {outcome.task} [dim]— {len(outcome.rollouts)} episode(s)[/dim]"
+
+
+def _cmd_run(args) -> int:
+    from opencrl import groupeval, warm
+    from opencrl.groups import resolve_group
+    from opencrl.models import OpenAIModel
+    console = _console()
+    if args.episodes < 1:
+        _error(console, f"episodes must be >= 1, got {args.episodes}")
+        return 1
+    model_id = args.model or os.environ.get("OPENCRL_MODEL")
+    if not model_id:
+        _error(console, "no model set: pass --model or set OPENCRL_MODEL",
+               hint="the model id is passed to the OpenAI-compatible chat API "
+                    "(requires the openai extra)")
+        return 1
+    try:
+        model = OpenAIModel(model_id)
+    except Exception as exc:
+        _error(console, f"could not build model {model_id!r}: {exc}",
+               hint="pip install 'opencrl[openai]'")
+        return 1
+    try:
+        index = warm.build_index(args.path)
+    except Exception as exc:
+        _error(console, f"Task discovery failed: {exc}")
+        return 1
+    # Exit codes mirror `opencrl warm`: 0 = every episode ran, 1 = a task
+    # failed, 2 = a group expression could not be resolved. Resolve every
+    # expression up front so a later unresolvable argument fails before any
+    # rollouts run, never discarding earlier groups' results.
+    try:
+        for expr in args.group:
+            resolve_group(expr, index)
+    except ValueError as exc:
+        _error(console, str(exc))
+        return 2
+    results = []
+    for expr in args.group:
+        result = groupeval.run_group_eval(
+            expr, model, episodes=args.episodes, index=index)
+        results.append(result)
+        for outcome in result.outcomes:
+            console.print(_run_line(outcome))
+    combined = groupeval.GroupEvalResult(
+        ", ".join(args.group), [o for r in results for o in r.outcomes])
+    if args.output is not None:
+        combined.write_jsonl(args.output)
+    console.print(f"\n[dim]{combined.summarize()}[/dim]"
+                  + (f" → {args.output}" if args.output else ""))
+    if any(o.error for o in combined.outcomes):
+        return 1
+    return 0
 
 # ── entrypoint ────────────────────────────────────────────────────────────
 
@@ -368,10 +501,11 @@ def main(argv=None) -> int:
             "  install              Clone modules repo, list available modules\n"
             "  install <module>     Activate a module\n"
             "  uninstall <module>   Deactivate a module\n"
-            "  update               Pull latest modules\n"
-            "  list                 List all discovered tasks\n"
+            "  list [module]        List tasks (all, one module, or local)\n"
             "  info <task>          Show task details\n"
             "  new <name>           Scaffold a new task\n"
+            "  warm <group...>      Prebuild images for a task group\n"
+            "  run <group...>       Run a task group, emit Rollouts as JSONL\n"
         ),
     )
     p.add_argument("--path", default=None, help="tasks directory (default: auto-discover)")
@@ -388,7 +522,10 @@ def main(argv=None) -> int:
     un.set_defaults(fn=_cmd_uninstall)
 
     sub.add_parser("update", help="pull latest modules").set_defaults(fn=_cmd_update)
-    sub.add_parser("list", help="list discovered tasks").set_defaults(fn=_cmd_list)
+    lst = sub.add_parser("list", help="list discovered tasks")
+    lst.add_argument("module", nargs="?", default=None,
+                     help="only show this module's tasks ('local' for ./tasks/)")
+    lst.set_defaults(fn=_cmd_list)
 
     info = sub.add_parser("info", help="show task details")
     info.add_argument("name", help="task name")
@@ -397,6 +534,26 @@ def main(argv=None) -> int:
     n = sub.add_parser("new", help="scaffold a new task")
     n.add_argument("name", help="task name (Python identifier)")
     n.set_defaults(fn=_cmd_new)
+
+    wm = sub.add_parser("warm", help="prebuild images for a task group")
+    wm.add_argument(
+        "group", nargs="+",
+        help="group expression (module/levelN, module/project=X, task name) "
+             "or several; exits 2 if a group expression cannot be resolved")
+    wm.set_defaults(fn=_cmd_warm)
+
+    rn = sub.add_parser("run", help="run a task group through the persistent pool")
+    rn.add_argument(
+        "group", nargs="+",
+        help="group expression (module/levelN, module/project=X, task name) "
+             "or several; exits 2 if a group expression cannot be resolved")
+    rn.add_argument("-n", "--episodes", type=int, default=1, metavar="N",
+                    help="episodes per task (default: 1)")
+    rn.add_argument("-o", "--output", default=None, metavar="FILE",
+                    help="write one Rollout per episode as JSONL")
+    rn.add_argument("-m", "--model", default=None, metavar="ID",
+                    help="OpenAI-compatible model id (default: $OPENCRL_MODEL)")
+    rn.set_defaults(fn=_cmd_run)
 
     # Handle --version before subparser check (required subparsers would
     # otherwise reject a bare --version)

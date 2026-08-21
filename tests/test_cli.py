@@ -133,6 +133,109 @@ def test_cli_list_shows_tasks(monkeypatch, tmp_path, capsys):
     _clear_registry()
 
 
+def _write_task(task_dir: Path, name: str) -> None:
+    """Write a task.py registering a task named ``name`` under ``task_dir``."""
+    task_dir.mkdir(parents=True, exist_ok=True)
+    task_dir.joinpath("task.py").write_text(
+        "from opencrl import task, Task, shell, flag, Caps\n"
+        "@task\n"
+        f"def {name}() -> Task:\n"
+        "    return Task(goal='test', reward=flag('CTF{x}'), tools=(shell,), caps=Caps(offensive=True))\n"
+    )
+
+
+def _activate_modules(home: Path, names: list[str]) -> None:
+    """Activate each module in ``names`` using the public modules API."""
+    import opencrl.modules as m
+    for name in names:
+        m.activate_module(name)
+
+
+def _fake_env(monkeypatch, tmp_path) -> Path:
+    """Point OPENCRL_HOME at a fresh home, cd to tmp_path, return modules dir."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("OPENCRL_HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+    return _make_fake_modules_repo(home)
+
+
+def _home_of(md: Path) -> Path:
+    """Return the OPENCRL_HOME containing modules dir ``md``."""
+    return md.parent.parent
+
+
+def test_cli_list_module_filter_shows_only_module(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    md = _fake_env(monkeypatch, tmp_path)
+    _write_task(md / "examples" / "demo", "demo")
+    _write_task(md / "extra" / "bonus", "bonus")
+    _activate_modules(_home_of(md), ["examples", "extra"])
+    rc = main(["list", "examples"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "demo" in out
+    assert "bonus" not in out
+    _clear_registry()
+
+
+def test_cli_list_unknown_module_error(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    md = _fake_env(monkeypatch, tmp_path)
+    _write_task(md / "examples" / "demo", "demo")
+    _activate_modules(_home_of(md), ["examples"])
+    rc = main(["list", "nope"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "nope" in out
+    assert "examples" in out
+    _clear_registry()
+
+
+def test_cli_list_bare_shows_all_modules(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    md = _fake_env(monkeypatch, tmp_path)
+    _write_task(md / "examples" / "demo", "demo")
+    _write_task(md / "extra" / "bonus", "bonus")
+    _activate_modules(_home_of(md), ["examples", "extra"])
+    rc = main(["list"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "demo" in out
+    assert "bonus" in out
+    _clear_registry()
+
+
+def test_cli_list_local_filter(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    md = _fake_env(monkeypatch, tmp_path)
+    _write_task(md / "examples" / "demo", "demo")
+    _activate_modules(_home_of(md), ["examples"])
+    _write_task(tmp_path / "tasks" / "mine", "mine")
+    rc = main(["list", "local"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "mine" in out
+    assert "demo" not in out
+    _clear_registry()
+
+
+def test_cli_list_module_with_no_tasks(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    md = _fake_env(monkeypatch, tmp_path)
+    # A module whose task.py registers nothing, plus a local task so
+    # discovery is non-empty and the filter branch is reached
+    (md / "empty" / "demo").mkdir(parents=True)
+    (md / "empty" / "demo" / "task.py").write_text("# no tasks registered\n")
+    _activate_modules(_home_of(md), ["empty"])
+    _write_task(tmp_path / "tasks" / "mine", "mine")
+    rc = main(["list", "empty"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No tasks found in module 'empty'" in out
+    assert "mine" not in out
+    _clear_registry()
+
+
 # ---------------------------------------------------------------------------
 # new
 # ---------------------------------------------------------------------------
@@ -149,15 +252,8 @@ def test_cli_new_still_works(monkeypatch, tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# run / eval removed
+# eval removed
 # ---------------------------------------------------------------------------
-
-def test_cli_no_run_command(monkeypatch, tmp_path):
-    _clear_registry()
-    import pytest
-    with pytest.raises(SystemExit):
-        main(["run", "web_sqli"])
-
 
 def test_cli_no_eval_command(monkeypatch, tmp_path):
     _clear_registry()
