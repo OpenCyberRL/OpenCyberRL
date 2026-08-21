@@ -384,14 +384,17 @@ _WARM_STYLES = {"built": "green", "cached": "cyan",
 
 def _warm_line(result) -> str:
     """One rich-formatted progress line for a warmed task."""
+    from rich.markup import escape
     style = _WARM_STYLES.get(result.status, "white")
     line = f"  [{style}]{result.status}[/{style}] {result.name}"
     if result.error:
-        line += f" [dim]— {result.error}[/dim]"
+        line += f" [dim]— {escape(result.error)}[/dim]"
     return line
 
 
 def _cmd_warm(args) -> int:
+    from rich.markup import escape
+
     from opencrl import warm
     from opencrl.backends.docker import Docker
 
@@ -401,17 +404,23 @@ def _cmd_warm(args) -> int:
     except Exception as exc:
         _error(console, f"Task discovery failed: {exc}")
         return 1
+    # Exit codes (deliberately richer than sibling commands' flat 1):
+    # 0 = everything built/cached, 1 = a build failed, 2 = a group
+    # expression could not be resolved. Each argument resolves independently
+    # — filters and bare task names may be freely mixed.
+    backend = Docker()
+    report = lambda r: console.print(_warm_line(r))
+    results = []
     try:
-        expr = args.group[0] if len(args.group) == 1 else args.group
-        results = warm.warm_group(expr, index, Docker(),
-                                  report=lambda r: console.print(_warm_line(r)))
+        for expr in args.group:
+            results.extend(warm.warm_group(expr, index, backend, report=report))
     except ValueError as exc:
         _error(console, str(exc))
         return 2
     console.print(f"\n[dim]{warm.summarize(results)}[/dim]")
     failed = [r for r in results if r.status == "failed"]
     if failed:
-        detail = "\n".join(f"  {r.name}: {r.error}" for r in failed)
+        detail = "\n".join(f"  {r.name}: {escape(r.error)}" for r in failed)
         _error(console, f"{len(failed)} task(s) failed to build:\n{detail}")
         return 1
     return 0
@@ -431,7 +440,6 @@ def main(argv=None) -> int:
             "  uninstall <module>   Deactivate a module\n"
             "  list [module]        List tasks (all, one module, or local)\n"
             "  info <task>          Show task details\n"
-
             "  new <name>           Scaffold a new task\n"
             "  warm <group...>      Prebuild images for a task group\n"
         ),
@@ -464,8 +472,10 @@ def main(argv=None) -> int:
     n.set_defaults(fn=_cmd_new)
 
     wm = sub.add_parser("warm", help="prebuild images for a task group")
-    wm.add_argument("group", nargs="+",
-                    help="group expression (module/levelN, module/project=X, task name) or several task names")
+    wm.add_argument(
+        "group", nargs="+",
+        help="group expression (module/levelN, module/project=X, task name) "
+             "or several; exits 2 if a group expression cannot be resolved")
     wm.set_defaults(fn=_cmd_warm)
 
     # Handle --version before subparser check (required subparsers would

@@ -13,8 +13,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from opencrl.backend import basedir_of
-from opencrl.groups import TaskIndex, resolve_group
+from opencrl.backend import resolve_backend
+from opencrl.backends import docker as docker_backend
+from opencrl.groups import GroupExpr, TaskIndex, resolve_group
 from opencrl.task import discover, get_task, list_tasks, load_world
 
 # Terminal status order used by summarize() and CLI coloring.
@@ -58,7 +59,7 @@ def _module_of(task) -> str:
     return rel.parts[0] if rel.parts else "local"
 
 
-def warm_group(expr, index: TaskIndex, backend,
+def warm_group(expr: GroupExpr, index: TaskIndex, backend,
                report: Callable[[WarmResult], None] | None = None) -> list[WarmResult]:
     """Resolve ``expr`` against ``index`` and prebuild every task's images.
 
@@ -83,7 +84,7 @@ def _warm_one(name: str, backend, report) -> WarmResult:
 def _classify_and_build(name: str, backend) -> WarmResult:
     """Prebuild one task, classifying the outcome against the pinned tags."""
     task = get_task(name)
-    if isinstance(task.backend, str) and task.backend != "docker":
+    if not _is_docker_task(task):
         return WarmResult(name, "skipped",
                           f"backend {task.backend!r} has no images to prebuild")
     spec = load_world(task)
@@ -106,21 +107,32 @@ def _classify_and_build(name: str, backend) -> WarmResult:
 def _pinned_tags(backend, spec: dict, caps) -> list[str] | None:
     """Content-addressed tags prebuild will pin for this world spec.
 
-    ``None`` when the backend doesn't expose the Docker rendering machinery
+    ``None`` when the backend doesn't expose the ``pinned_tags`` seam
     (e.g. a test double) — the outcome then can't be pre-classified.
     """
-    render = getattr(backend, "_render", None)
-    if render is None:
+    pinned = getattr(backend, "pinned_tags", None)
+    if pinned is None:
         return None
-    from opencrl.backends import docker as docker_backend
-    spec = spec or {}
-    doc, _agent = render(spec, caps)
-    ids = docker_backend._pin_build_images(doc, basedir_of(spec))
-    return [f"opencrl-build-{i}" for i in ids]
+    return pinned(spec, caps)
+
+
+def _is_docker_task(task) -> bool:
+    """Whether the task's backend resolves to the Docker backend."""
+    try:
+        be = resolve_backend(task.backend)
+    except KeyError:                   # unknown backend name
+        return False
+    # Resolved late (not imported at module load) so tests that swap
+    # docker.Docker for a fake still identify fakes as the docker backend.
+    return isinstance(be, docker_backend.Docker)
 
 
 def _layer_chain(tag: str) -> str | None:
-    """The image's layer-chain fingerprint, or ``None`` when the tag is absent."""
+    """The image's layer-chain fingerprint, or ``None`` when the tag is absent.
+
+    A transient docker-inspect failure also reads as absent, so the caller
+    classifies such a task as ``built`` rather than ``cached``.
+    """
     try:
         cp = subprocess.run(
             ["docker", "image", "inspect", "--format", "{{json .RootFS.Layers}}", tag],

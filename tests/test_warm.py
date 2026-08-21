@@ -202,7 +202,7 @@ def test_summarize_counts_each_status():
 
 
 def test_summarize_empty_results():
-    assert warm.summarize([]) != ""
+    assert warm.summarize([]) == "no tasks warmed"
 
 
 # ---------------------------------------------------------------------------
@@ -215,15 +215,20 @@ def _build_spec():
 
 
 def test_warm_reports_no_build_for_image_only_world(monkeypatch):
-    monkeypatch.setattr(dk, "_run", lambda args, timeout=None: _ok_cp())
+    calls = []
+
+    def fake_run(args, timeout=None):
+        calls.append(args)
+        return _ok_cp()
+
+    monkeypatch.setattr(dk, "_run", fake_run)
     _register("t", {"services": {"a": {"image": "alpine"}}})
     index = _index(("t", "m", None, 0))
-    be = dk.Docker()
 
-    (result,) = warm.warm_group("t", index, be)
+    (result,) = warm.warm_group("t", index, dk.Docker())
 
     assert result.status == "no-build"
-    assert not be._built
+    assert not any("build" in c for c in calls)   # no docker compose build ran
 
 
 def test_warm_reports_cached_when_layer_chain_unchanged(monkeypatch):
@@ -273,10 +278,16 @@ def test_warm_reports_built_when_layers_changed(monkeypatch):
     assert result.status == "built"
 
 def test_pinned_tags_are_content_addressed():
-    tags1 = warm._pinned_tags(dk.Docker(), _build_spec(), Caps())
-    tags2 = warm._pinned_tags(dk.Docker(), _build_spec(), Caps())
+    # warm delegates to the backend's public pinned_tags seam.
+    be = dk.Docker()
+    tags1 = warm._pinned_tags(be, _build_spec(), Caps())
+    tags2 = be.pinned_tags(_build_spec(), Caps())
     assert tags1 == tags2
     assert tags1[0].startswith("opencrl-build-")
+
+
+def test_pinned_tags_none_when_backend_lacks_the_seam():
+    assert warm._pinned_tags(FakeBackend(), _build_spec(), Caps()) is None
 
 
 # ---------------------------------------------------------------------------
@@ -298,9 +309,12 @@ def test_cli_warm_failure_exit_nonzero_and_summary_names_failures(
         monkeypatch, capsys):
     _register("good", {"x-opencrl": {"task": "good"}})
     _register("bad", {"x-opencrl": {"task": "bad"}})
-    monkeypatch.setattr(
-        "opencrl.backends.docker.Docker",
-        lambda: FakeBackend(fail_for={"bad"}))
+
+    class FailingBackend(FakeBackend):
+        def __init__(self):
+            super().__init__(fail_for={"bad"})
+
+    monkeypatch.setattr("opencrl.backends.docker.Docker", FailingBackend)
 
     rc = main(["warm", "good", "bad"])
 
@@ -309,6 +323,29 @@ def test_cli_warm_failure_exit_nonzero_and_summary_names_failures(
     assert "bad" in out            # failure named
     assert "boom for bad" in out   # ...with its reason
     assert "good" in out           # non-failure still reported
+
+
+def test_cli_warm_resolves_each_argument_independently(monkeypatch, capsys):
+    # A filter form and a bare task name mix freely; each resolves on its own.
+    _register("a", {"x-opencrl": {"task": "a"}})
+    _register("b", {"x-opencrl": {"task": "b"}})
+
+    made = []
+
+    class RecordingBackend(FakeBackend):
+        def __init__(self):
+            super().__init__()
+            made.append(self)
+
+    monkeypatch.setattr("opencrl.backends.docker.Docker", RecordingBackend)
+
+    rc = main(["warm", "local/level0", "a"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    calls = [c for be in made for c in be.calls]
+    assert [c["x-opencrl"]["task"] for c in calls] == ["a", "b", "a"]
+    assert "3 built" in out
 
 
 def test_cli_warm_unknown_group_expression_errors(monkeypatch, capsys):

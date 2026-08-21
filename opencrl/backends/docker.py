@@ -22,6 +22,7 @@ from opencrl.task import Caps
 # implicitly placed on it, so reusing that name (rather than a custom one)
 # keeps them co-located with any service that explicitly lists `default`.
 _NET = "default"
+_TAG_PREFIX = "opencrl-build-"
 
 # Cap on any single exec/read_file's returned output, so a hostile or buggy
 # command (e.g. `yes`) can't balloon host memory just because it stayed
@@ -89,7 +90,7 @@ def _pin_build_images(doc: dict, basedir: str = "") -> list[str]:
             build_key = json.dumps(build or {}, sort_keys=True, default=str)
         build_key = _expand_vars(build_key)
         digest = hashlib.sha256(f"{basedir}|{platform}|{build_key}".encode()).hexdigest()[:12]
-        new_tag = f"opencrl-build-{digest}"
+        new_tag = _TAG_PREFIX + digest
         original = svc.get("image")
         if original:
             rewrites[original] = new_tag
@@ -214,13 +215,29 @@ class Docker:
             yaml.safe_dump(doc, f)
         return path
 
+    def _render_pinned(self, spec: dict, caps: Caps) -> tuple[dict, list[str]]:
+        """Render a spec and pin its build images; returns (doc, identities)."""
+        doc, _agent = self._render(spec, caps)
+        identities = _pin_build_images(doc, basedir_of(spec))
+        return doc, identities
+
+    def pinned_tags(self, spec: dict, caps: Caps) -> list[str]:
+        """Content-addressed image tags a build of this spec pins to.
+
+        Empty when the world has no ``build:`` services. The tags are stable
+        for identical build inputs, so an existing tag means the prebuilt
+        image may already be in the local store (callers wanting certainty
+        should compare layer digests across a prebuild, not tag presence).
+        """
+        _doc, identities = self._render_pinned(spec, caps)
+        return [_TAG_PREFIX + d for d in identities]
+
     def prebuild(self, spec: dict, caps: Caps) -> None:
         """Build a task's images ONCE (into stable tags) before fan-out, so N
         concurrent up()s don't each rebuild. No-op if the world has no build:."""
         spec = spec or {}
         basedir = basedir_of(spec)
-        doc, _agent = self._render(spec, caps)
-        identities = _pin_build_images(doc, basedir)
+        doc, identities = self._render_pinned(spec, caps)
         if not identities:
             return
         path = self._write_compose(doc)
