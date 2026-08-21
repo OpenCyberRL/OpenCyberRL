@@ -145,9 +145,10 @@ def _write_task(task_dir: Path, name: str) -> None:
 
 
 def _activate_modules(home: Path, names: list[str]) -> None:
-    """Create the active-modules file listing ``names`` under ``home``."""
-    (home / "active").parent.mkdir(parents=True, exist_ok=True)
-    (home / "active").write_text("".join(n + "\n" for n in names))
+    """Activate each module in ``names`` using the public modules API."""
+    import opencrl.modules as m
+    for name in names:
+        m.activate_module(name)
 
 
 def _fake_env(monkeypatch, tmp_path) -> Path:
@@ -215,6 +216,23 @@ def test_cli_list_local_filter(monkeypatch, tmp_path, capsys):
     assert rc == 0
     assert "mine" in out
     assert "demo" not in out
+    _clear_registry()
+
+
+def test_cli_list_module_with_no_tasks(monkeypatch, tmp_path, capsys):
+    _clear_registry()
+    md = _fake_env(monkeypatch, tmp_path)
+    # A module whose task.py registers nothing, plus a local task so
+    # discovery is non-empty and the filter branch is reached
+    (md / "empty" / "demo").mkdir(parents=True)
+    (md / "empty" / "demo" / "task.py").write_text("# no tasks registered\n")
+    _activate_modules(_home_of(md), ["empty"])
+    _write_task(tmp_path / "tasks" / "mine", "mine")
+    rc = main(["list", "empty"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "No tasks found in module 'empty'" in out
+    assert "mine" not in out
     _clear_registry()
 
 

@@ -231,10 +231,11 @@ def _cmd_list(args) -> int:
     active = modules.active_modules() if modules.is_cloned() else []
 
     # Optional module filter: show only that module's tasks
-    selected = getattr(args, "module", None)
-    if selected is not None and selected not in ["local"] + active:
+    choices = ["local"] + active
+    selected = args.module
+    if selected is not None and selected not in choices:
         _error(console, f"Unknown module '{selected}'.",
-               hint="Available: " + ", ".join(["local"] + active))
+               hint="Available: " + ", ".join(choices))
         return 1
 
     if not tasks:
@@ -388,8 +389,7 @@ def main(argv=None) -> int:
             "  install              Clone modules repo, list available modules\n"
             "  install <module>     Activate a module\n"
             "  uninstall <module>   Deactivate a module\n"
-            "  update               Pull latest modules\n"
-            "  list [module]        List tasks (all, or one module's / local)\n"
+            "  list [module]        List tasks (all, one module, or local)\n"
             "  info <task>          Show task details\n"
             "  new <name>           Scaffold a new task\n"
         ),
