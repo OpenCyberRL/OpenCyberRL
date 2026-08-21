@@ -1,4 +1,4 @@
-"""opencrl CLI: install | uninstall | update | list | info | new."""
+"""opencrl CLI: install | uninstall | update | list | info | new | warm."""
 from __future__ import annotations
 
 import argparse
@@ -376,6 +376,46 @@ def _cmd_new(args) -> int:
                   f"  [bold]python -c \"from opencrl import discover, get_task, rollout; discover(); print(rollout(get_task('{args.name}'), model))\"[/bold]")
     return 0
 
+# ── warm ──────────────────────────────────────────────────────────────────
+
+_WARM_STYLES = {"built": "green", "cached": "cyan",
+                "no-build": "dim", "skipped": "yellow", "failed": "red"}
+
+
+def _warm_line(result) -> str:
+    """One rich-formatted progress line for a warmed task."""
+    style = _WARM_STYLES.get(result.status, "white")
+    line = f"  [{style}]{result.status}[/{style}] {result.name}"
+    if result.error:
+        line += f" [dim]— {result.error}[/dim]"
+    return line
+
+
+def _cmd_warm(args) -> int:
+    from opencrl import warm
+    from opencrl.backends.docker import Docker
+
+    console = _console()
+    try:
+        index = warm.build_index(args.path)
+    except Exception as exc:
+        _error(console, f"Task discovery failed: {exc}")
+        return 1
+    try:
+        expr = args.group[0] if len(args.group) == 1 else args.group
+        results = warm.warm_group(expr, index, Docker(),
+                                  report=lambda r: console.print(_warm_line(r)))
+    except ValueError as exc:
+        _error(console, str(exc))
+        return 2
+    console.print(f"\n[dim]{warm.summarize(results)}[/dim]")
+    failed = [r for r in results if r.status == "failed"]
+    if failed:
+        detail = "\n".join(f"  {r.name}: {r.error}" for r in failed)
+        _error(console, f"{len(failed)} task(s) failed to build:\n{detail}")
+        return 1
+    return 0
+
 
 # ── entrypoint ────────────────────────────────────────────────────────────
 
@@ -391,7 +431,9 @@ def main(argv=None) -> int:
             "  uninstall <module>   Deactivate a module\n"
             "  list [module]        List tasks (all, one module, or local)\n"
             "  info <task>          Show task details\n"
+
             "  new <name>           Scaffold a new task\n"
+            "  warm <group...>      Prebuild images for a task group\n"
         ),
     )
     p.add_argument("--path", default=None, help="tasks directory (default: auto-discover)")
@@ -420,6 +462,11 @@ def main(argv=None) -> int:
     n = sub.add_parser("new", help="scaffold a new task")
     n.add_argument("name", help="task name (Python identifier)")
     n.set_defaults(fn=_cmd_new)
+
+    wm = sub.add_parser("warm", help="prebuild images for a task group")
+    wm.add_argument("group", nargs="+",
+                    help="group expression (module/levelN, module/project=X, task name) or several task names")
+    wm.set_defaults(fn=_cmd_warm)
 
     # Handle --version before subparser check (required subparsers would
     # otherwise reject a bare --version)
