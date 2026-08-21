@@ -384,6 +384,7 @@ class GroupPool:
 def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
               concurrency: int | None = None, backend=None,
               on_result: "Callable[[int, Rollout], None] | None" = None,
+              on_error: "Callable[[Task, BaseException], None] | None" = None,
               capacity: int | None = None) -> list[Rollout]:
     """Run `episodes` rollouts per task over a task group on one shared pool.
 
@@ -394,6 +395,13 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
     task's). Returns Rollouts in submission order — task order, then episode
     order. Every task needs a reset hook (Task.reset or x-opencrl.reset),
     validated before any prebuild runs.
+
+    on_error switches the run to failure tolerance (opencrl.warm's posture):
+    a task that fails — at hook validation, prebuild, bring-up, rollout, or
+    scoring — is reported once as (task, exception), its remaining episodes
+    are skipped, and the group runs on; failed episodes leave None holes in
+    the returned list. Default (None): the first failure aborts pending jobs
+    and re-raises, matching run_batch.
     """
     tasks = list(tasks)
     provider = _model_provider(model, model_factory)   # validates model xor factory
@@ -407,17 +415,39 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
     size = concurrency or min(len(jobs), os.cpu_count() or 1)
     size = max(1, min(size, len(jobs)))
     pool = GroupPool(resolved, capacity or size)
+    lock = threading.Lock()
+    failed: set[int] = set()         # tolerant mode only: reported task ids
+
+    def _tolerated(task_obj, exc: BaseException) -> bool:
+        """Report `exc` for `task_obj` in tolerant mode; mark it dead."""
+        if on_error is None:
+            return False
+        with lock:
+            on_error(task_obj, exc)
+            failed.add(id(task_obj))
+        return True
+
     # Validate reset hooks + load specs before prebuild; dict dedupes tasks.
-    entries = {id(t): pool.entry(t) for t in tasks}
+    entries: dict[int, tuple] = {}
+    for t in tasks:
+        try:
+            entries[id(t)] = pool.entry(t)
+        except BaseException as e:
+            if not _tolerated(t, e):
+                raise
     prebuild = getattr(resolved, "prebuild", None)
     if prebuild is not None:           # prebuild each distinct task once, not per episode
-        for task_obj, spec, _reset in entries.values():
-            prebuild(spec, task_obj.caps)
+        for task_obj, spec, _reset in list(entries.values()):
+            try:
+                prebuild(spec, task_obj.caps)
+            except BaseException as e:
+                if not _tolerated(task_obj, e):
+                    raise
+                del entries[id(task_obj)]
     results: list[Rollout | None] = [None] * len(jobs)
     jobs_q: "Queue[int]" = Queue()
     for i in range(len(jobs)):
         jobs_q.put(i)
-    lock = threading.Lock()
     abort = threading.Event()          # first failure stops pending jobs
     errors: list[BaseException] = []
 
@@ -428,6 +458,10 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
             except Empty:
                 return
             task = jobs[i][0]
+            with lock:
+                dead = id(task) in failed
+            if dead:                   # tolerant mode: the task already failed
+                continue
             world = None
             try:
                 world = pool.draw(task)
@@ -441,6 +475,8 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
             except BaseException as e:  # draw / _play / on_result failure
                 if world is not None:
                     pool.discard(world)  # tear the failed world down; wake blocked draws
+                if _tolerated(task, e):  # tolerant mode: report and move on
+                    continue
                 with lock:
                     errors.append(e)
                 abort.set()

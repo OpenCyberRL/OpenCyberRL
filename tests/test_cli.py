@@ -252,15 +252,8 @@ def test_cli_new_still_works(monkeypatch, tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# run / eval removed
+# eval removed
 # ---------------------------------------------------------------------------
-
-def test_cli_no_run_command(monkeypatch, tmp_path):
-    _clear_registry()
-    import pytest
-    with pytest.raises(SystemExit):
-        main(["run", "web_sqli"])
-
 
 def test_cli_no_eval_command(monkeypatch, tmp_path):
     _clear_registry()

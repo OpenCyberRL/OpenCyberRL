@@ -1,8 +1,9 @@
-"""opencrl CLI: install | uninstall | update | list | info | new | warm."""
+"""opencrl CLI: install | uninstall | update | list | info | new | warm | run."""
 from __future__ import annotations
 
 import argparse
 import keyword
+import os
 import sys
 from pathlib import Path
 
@@ -426,6 +427,64 @@ def _cmd_warm(args) -> int:
     return 0
 
 
+# ── run ───────────────────────────────────────────────────────────────────
+
+def _run_line(outcome) -> str:
+    """One rich-formatted result line for a run task."""
+    from rich.markup import escape
+    if outcome.error:
+        return f"  [red]failed[/red] {outcome.task} [dim]— {escape(outcome.error)}[/dim]"
+    return f"  [green]ok[/green] {outcome.task} [dim]— {len(outcome.rollouts)} episode(s)[/dim]"
+
+
+def _cmd_run(args) -> int:
+    from opencrl import groupeval, warm
+    from opencrl.models import OpenAIModel
+    console = _console()
+    if args.episodes < 1:
+        _error(console, f"episodes must be >= 1, got {args.episodes}")
+        return 1
+    model_id = args.model or os.environ.get("OPENCRL_MODEL")
+    if not model_id:
+        _error(console, "no model set: pass --model or set OPENCRL_MODEL",
+               hint="the model id is passed to the OpenAI-compatible chat API "
+                    "(requires the openai extra)")
+        return 1
+    try:
+        model = OpenAIModel(model_id)
+    except Exception as exc:
+        _error(console, f"could not build model {model_id!r}: {exc}",
+               hint="pip install 'opencrl[openai]'")
+        return 1
+    try:
+        index = warm.build_index(args.path)
+    except Exception as exc:
+        _error(console, f"Task discovery failed: {exc}")
+        return 1
+    # Exit codes mirror `opencrl warm`: 0 = every episode ran, 1 = a task
+    # failed, 2 = a group expression could not be resolved. Each argument
+    # resolves independently — filters and bare task names may be freely mixed.
+    results = []
+    try:
+        for expr in args.group:
+            result = groupeval.run_group_eval(
+                expr, model, episodes=args.episodes, index=index)
+            results.append(result)
+            for outcome in result.outcomes:
+                console.print(_run_line(outcome))
+    except ValueError as exc:
+        _error(console, str(exc))
+        return 2
+    combined = groupeval.GroupEvalResult(
+        ", ".join(args.group), [o for r in results for o in r.outcomes])
+    if args.output is not None:
+        combined.write_jsonl(args.output)
+    console.print(f"\n[dim]{combined.summarize()}[/dim]"
+                  + (f" → {args.output}" if args.output else ""))
+    if any(o.error for o in combined.outcomes):
+        return 1
+    return 0
+
 # ── entrypoint ────────────────────────────────────────────────────────────
 
 def main(argv=None) -> int:
@@ -442,6 +501,7 @@ def main(argv=None) -> int:
             "  info <task>          Show task details\n"
             "  new <name>           Scaffold a new task\n"
             "  warm <group...>      Prebuild images for a task group\n"
+            "  run <group...>       Run a task group, emit Rollouts as JSONL\n"
         ),
     )
     p.add_argument("--path", default=None, help="tasks directory (default: auto-discover)")
@@ -477,6 +537,19 @@ def main(argv=None) -> int:
         help="group expression (module/levelN, module/project=X, task name) "
              "or several; exits 2 if a group expression cannot be resolved")
     wm.set_defaults(fn=_cmd_warm)
+
+    rn = sub.add_parser("run", help="run a task group through the persistent pool")
+    rn.add_argument(
+        "group", nargs="+",
+        help="group expression (module/levelN, module/project=X, task name) "
+             "or several; exits 2 if a group expression cannot be resolved")
+    rn.add_argument("-n", "--episodes", type=int, default=1, metavar="N",
+                    help="episodes per task (default: 1)")
+    rn.add_argument("-o", "--output", default=None, metavar="FILE",
+                    help="write one Rollout per episode as JSONL")
+    rn.add_argument("-m", "--model", default=None, metavar="ID",
+                    help="OpenAI-compatible model id (default: $OPENCRL_MODEL)")
+    rn.set_defaults(fn=_cmd_run)
 
     # Handle --version before subparser check (required subparsers would
     # otherwise reject a bare --version)

@@ -19,11 +19,13 @@ from opencrl.adapters.trl_adapter import to_trl
 from opencrl.adapters.verl_adapter import to_verl
 from opencrl.adapters.export import export_rollouts
 from opencrl.runner import run_batch, run_group, GroupPool
+from opencrl.groupeval import run_group_eval, GroupEvalResult, TaskOutcome
 
 __all__ = [
     "task", "Task", "Caps", "Tool", "shell",
     "flag", "contains", "file_exists", "stage", "chain", "goals", "Score",
     "rollout", "Rollout", "State", "evaluate", "run_batch", "run_group", "GroupPool",
+    "run_group_eval", "GroupEvalResult", "TaskOutcome",
     "to_gym", "to_gym_vector",
     "to_trl", "to_verl", "export_rollouts",
     "Docker", "Qemu", "MockBackend", "ScriptedModel", "OpenAIModel",
