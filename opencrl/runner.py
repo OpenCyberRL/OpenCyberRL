@@ -211,9 +211,11 @@ class GroupPool:
     task runs its reset hook and is reused; a cold task is brought up via
     backend.up, evicting the least-recently-used idle world once `capacity`
     worlds are live. A checked-out world is in flight and is NEVER evicted —
-    the hard invariant. release() returns it as most-recently-used idle;
-    discard() tears it down instead (a failed episode's world must not be
-    reused). Every task needs a reset hook (Task.reset or x-opencrl.reset).
+    the hard invariant (note: close() is not eviction; it tears down every
+    live world, checked-out ones included, and owns all teardown afterwards).
+    release() returns it as most-recently-used idle; discard() tears it down
+    instead (a failed episode's world must not be reused). Every task needs
+    a reset hook (Task.reset or x-opencrl.reset).
     """
 
     def __init__(self, backend, capacity: int):
@@ -232,7 +234,7 @@ class GroupPool:
 
     def draw(self, task):
         """Check out a world for one episode on `task` (see class docstring)."""
-        task_obj, spec, reset_cmd = self._entry(task)
+        task_obj, spec, reset_cmd = self.entry(task)
         world = victim = None
         with self._cond:
             while True:
@@ -279,17 +281,21 @@ class GroupPool:
         return world
 
     def release(self, world) -> None:
-        """Return a checked-out world to the pool as most-recently-used idle."""
+        """Return a checked-out world to the pool as most-recently-used idle.
+
+        A no-op once the pool is closed: close() owns teardown from then on
+        and has already downed every live world — downing again would be a
+        double teardown.
+        """
         with self._cond:
-            if not self._closed:
-                lease = self._inflight.pop(world, None)
-                if lease is None:
-                    raise ValueError(
-                        "opencrl: release() on a world that is not checked out")
-                self._idle[world] = lease
-                self._cond.notify_all()    # a blocked draw may now proceed
+            if self._closed:            # close() already tore this world down
                 return
-        self._backend.down(world)          # released after close(): tear it down
+            lease = self._inflight.pop(world, None)
+            if lease is None:
+                raise ValueError(
+                    "opencrl: release() on a world that is not checked out")
+            self._idle[world] = lease
+            self._cond.notify_all()     # a blocked draw may now proceed
 
     def discard(self, world) -> None:
         """Drop a checked-out world and tear it down (best effort).
@@ -297,17 +303,27 @@ class GroupPool:
         For worlds whose episode failed: unlike release() the world never
         returns to idle (a contaminated world must not be reused), and a
         failing down() is swallowed so it cannot mask the episode error.
+        A no-op once the pool is closed: close() owns teardown from then on.
         """
         with self._cond:
             self._inflight.pop(world, None)
-            self._cond.notify_all()        # live count dropped: wake blocked draws
+            closed = self._closed
+            self._cond.notify_all()     # live count dropped: wake blocked draws
+        if closed:                      # close() already tore this world down
+            return
         try:
             self._backend.down(world)
         except BaseException:
             pass
 
     def close(self) -> None:
-        """Tear down every live world, idle or in flight; raise the first failure."""
+        """Tear down every live world, idle or in flight; raise the first failure.
+
+        Idempotent. Does NOT wait for in-flight episodes: call it only after
+        every draw/release/discard has returned (run_group guarantees this by
+        joining its workers before closing). Afterwards every live world has
+        been downed exactly once and release()/discard() are no-ops.
+        """
         with self._cond:
             if self._closed:
                 return
@@ -315,9 +331,9 @@ class GroupPool:
             worlds = list(self._idle) + list(self._inflight)
             self._idle.clear()
             self._inflight.clear()
-            self._cond.notify_all()        # wake blocked draws (they will raise)
+            self._cond.notify_all()     # wake blocked draws (they will raise)
         errors: list[BaseException] = []
-        for w in worlds:                   # tear down every world, even if one fails
+        for w in worlds:                # tear down every world, even if one fails
             try:
                 self._backend.down(w)
             except BaseException as e:
@@ -325,12 +341,13 @@ class GroupPool:
         if errors:
             raise errors[0]
 
-    def _entry(self, task):
-        """Per-task cache of (task, world spec, reset hook); validates the hook.
+    def entry(self, task):
+        """(task, world spec, reset hook) for a task, cached; validates the hook.
 
-        Concurrent first draws may race the cache; the recomputed entry is
-        identical, so the benign overwrite needs no lock (load_world is file
-        I/O and stays off the pool lock).
+        Public so callers like run_group can validate hooks and prebuild
+        before any world comes up. Concurrent first calls may race the cache;
+        the recomputed entry is identical, so the benign overwrite needs no
+        lock (load_world is file I/O and stays off the pool lock).
         """
         cached = self._entries.get(id(task))
         if cached is None:
@@ -341,12 +358,16 @@ class GroupPool:
 
     def _warm(self, key: int):
         """Pop an idle world for task `key`, marking it in flight."""
+        found = None
         for world, lease in self._idle.items():
             if lease[0] == key:
-                del self._idle[world]
-                self._inflight[world] = lease
-                return world
-        return None
+                found = (world, lease)
+                break
+        if found is None:
+            return None
+        del self._idle[found[0]]        # mutate only after the scan ends
+        self._inflight[found[0]] = found[1]
+        return found[0]
 
     def _unreserve(self) -> None:
         """Release a failed bring-up's reservation and wake blocked draws."""
@@ -376,6 +397,9 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
     """
     tasks = list(tasks)
     provider = _model_provider(model, model_factory)   # validates model xor factory
+    if capacity is not None and capacity < 1:
+        raise ValueError(
+            f"opencrl: group pool capacity must be >= 1, got {capacity}")
     jobs = [(t, e) for t in tasks for e in range(episodes)]
     if not jobs:                                       # no work: never touch the backend
         return []
@@ -383,16 +407,12 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
     size = concurrency or min(len(jobs), os.cpu_count() or 1)
     size = max(1, min(size, len(jobs)))
     pool = GroupPool(resolved, capacity or size)
-    for t in tasks:                    # validate reset hooks + load specs before prebuild
-        pool._entry(t)
+    # Validate reset hooks + load specs before prebuild; dict dedupes tasks.
+    entries = {id(t): pool.entry(t) for t in tasks}
     prebuild = getattr(resolved, "prebuild", None)
     if prebuild is not None:           # prebuild each distinct task once, not per episode
-        seen: set[int] = set()
-        for t in tasks:
-            if id(t) not in seen:
-                seen.add(id(t))
-                _, spec, _ = pool._entry(t)
-                prebuild(spec, t.caps)
+        for task_obj, spec, _reset in entries.values():
+            prebuild(spec, task_obj.caps)
     results: list[Rollout | None] = [None] * len(jobs)
     jobs_q: "Queue[int]" = Queue()
     for i in range(len(jobs)):

@@ -51,6 +51,7 @@ def _torn_down(be):
 
 
 def _brought_up(be):
+    """The set of upped world identities (objects lack __eq__)."""
     return set(map(id, be.ups))
 
 
@@ -319,3 +320,42 @@ def test_release_unknown_world_is_rejected():
     pool = GroupPool(CountingBackend(), capacity=1)
     with pytest.raises(ValueError, match="checked out"):
         pool.release(MockWorld())
+
+
+def test_release_after_close_does_not_double_down():
+    be = CountingBackend()
+    pool = GroupPool(be, capacity=1)
+    task = _task("t")
+    world = pool.draw(task)
+    pool.close()                       # close() owns teardown: downs the in-flight world
+    assert be.downs == [world]
+    pool.release(world)                # late release must NOT down it a second time
+    assert be.downs == [world]
+
+
+def test_discard_after_close_does_not_double_down():
+    be = CountingBackend()
+    pool = GroupPool(be, capacity=1)
+    task = _task("t")
+    world = pool.draw(task)
+    pool.close()
+    assert be.downs == [world]
+    pool.discard(world)                # late discard must NOT down it a second time
+    assert be.downs == [world]
+
+
+def test_close_is_idempotent():
+    be = CountingBackend()
+    pool = GroupPool(be, capacity=2)
+    w1 = pool.draw(_task("t1"))
+    pool.release(w1)
+    pool.close()
+    assert len(be.downs) == 1
+    pool.close()                       # second close is a no-op
+    assert len(be.downs) == 1
+
+
+def test_run_group_rejects_nonpositive_capacity():
+    with pytest.raises(ValueError, match="capacity"):
+        run_group([_task("t")], _win, episodes=1, backend=CountingBackend(),
+                  capacity=0)
