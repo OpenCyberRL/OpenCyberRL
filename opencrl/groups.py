@@ -100,7 +100,12 @@ def _resolve_str(expr: str, index: TaskIndex, names: set[str]) -> list[str]:
 
 
 def _resolve_explicit(requested: list[str], names: set[str]) -> list[str]:
-    """Resolve an explicit list of task names, preserving input order."""
+    """Resolve an explicit list of task names, preserving input order.
+
+    Duplicates pass through verbatim: the caller's list is the caller's
+    decision (e.g. running multiple replicas of one task), so deduplication
+    is left to consumers.
+    """
     if not requested:
         raise ValueError("empty group expression: an explicit task list must name at least one task")
     missing = [name for name in requested if name not in names]

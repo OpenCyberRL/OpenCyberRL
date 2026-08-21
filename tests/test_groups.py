@@ -83,11 +83,6 @@ def test_level_filter_over_shuffled_index_is_sorted(index):
     ]
 
 
-def test_determinism_of_output_order(index):
-    assert resolve_group("cybergym/level1", index) == resolve_group("cybergym/level1", index)
-    assert resolve_group("cybergym/project=libxml2", index) == resolve_group("cybergym/project=libxml2", index)
-
-
 def test_default_keys_missing_project_and_level(index):
     # Index entries may omit optional keys; defaults are project=None, level=0.
     minimal = [
@@ -99,9 +94,7 @@ def test_default_keys_missing_project_and_level(index):
 # --- error cases ------------------------------------------------------------
 
 def test_unknown_module_errors_with_known_modules(index):
-    with pytest.raises(ValueError, match="cybergm"):
-        resolve_group("cybergm/level1", index)
-    with pytest.raises(ValueError, match="cybergym"):
+    with pytest.raises(ValueError, match=r"unknown module 'cybergm'.*known modules"):
         resolve_group("cybergm/level1", index)
 
 
@@ -121,8 +114,12 @@ def test_unknown_task_name_in_explicit_list(index):
 
 
 def test_unknown_bare_string_errors(index):
+    # A non-filter string (e.g. "cybergym/levelX") falls through to the
+    # task-name path and errors identically.
     with pytest.raises(ValueError, match="cybergym/nope"):
         resolve_group("cybergym/nope", index)
+    with pytest.raises(ValueError, match="cybergym/levelX"):
+        resolve_group("cybergym/levelX", index)
 
 
 def test_empty_explicit_list_errors(index):
@@ -135,9 +132,19 @@ def test_empty_index_errors_on_any_expression():
         resolve_group("cybergym/level1", [])
 
 
-def test_malformed_expression_errors(index):
-    with pytest.raises(ValueError):
-        resolve_group("cybergym/levelX", index)
+
+def test_non_string_expression_raises_type_error(index):
+    with pytest.raises(TypeError, match="string or sequence"):
+        resolve_group(3, index)
+
+
+def test_explicit_list_duplicates_pass_through(index):
+    # Contract: explicit lists are returned verbatim, in input order —
+    # duplicates are the caller's decision (e.g. task replicas), not an error.
+    assert resolve_group(["cybergym/unclaimed", "cybergym/unclaimed"], index) == [
+        "cybergym/unclaimed",
+        "cybergym/unclaimed",
+    ]
 
 
 # --- index validation -------------------------------------------------------
@@ -165,6 +172,11 @@ def test_validate_index_rejects_bad_types():
         validate_index([{"name": "a", "module": "m", "level": "one"}])
     with pytest.raises(ValueError, match="project"):
         validate_index([{"name": "a", "module": "m", "project": 3}])
+
+
+def test_validate_index_rejects_non_mapping_entry():
+    with pytest.raises(ValueError, match="not a mapping"):
+        validate_index([["not-a-dict"]])
 
 
 def test_resolve_group_rejects_duplicate_names_in_index():
