@@ -439,6 +439,7 @@ def _run_line(outcome) -> str:
 
 def _cmd_run(args) -> int:
     from opencrl import groupeval, warm
+    from opencrl.groups import resolve_group
     from opencrl.models import OpenAIModel
     console = _console()
     if args.episodes < 1:
@@ -462,19 +463,22 @@ def _cmd_run(args) -> int:
         _error(console, f"Task discovery failed: {exc}")
         return 1
     # Exit codes mirror `opencrl warm`: 0 = every episode ran, 1 = a task
-    # failed, 2 = a group expression could not be resolved. Each argument
-    # resolves independently — filters and bare task names may be freely mixed.
-    results = []
+    # failed, 2 = a group expression could not be resolved. Resolve every
+    # expression up front so a later unresolvable argument fails before any
+    # rollouts run, never discarding earlier groups' results.
     try:
         for expr in args.group:
-            result = groupeval.run_group_eval(
-                expr, model, episodes=args.episodes, index=index)
-            results.append(result)
-            for outcome in result.outcomes:
-                console.print(_run_line(outcome))
+            resolve_group(expr, index)
     except ValueError as exc:
         _error(console, str(exc))
         return 2
+    results = []
+    for expr in args.group:
+        result = groupeval.run_group_eval(
+            expr, model, episodes=args.episodes, index=index)
+        results.append(result)
+        for outcome in result.outcomes:
+            console.print(_run_line(outcome))
     combined = groupeval.GroupEvalResult(
         ", ".join(args.group), [o for r in results for o in r.outcomes])
     if args.output is not None:

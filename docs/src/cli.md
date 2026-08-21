@@ -93,10 +93,9 @@ for outcome in result.outcomes:
 
 ## Options
 
-
 | Option | Commands | Meaning |
 |---|---|---|
-| `--path` | `list` | Override task discovery path. Defaults to auto-discover (local `tasks/` + active modules). |
+| `--path` | `list`, `warm`, `run` | Override task discovery path. Defaults to auto-discover (local `tasks/` + active modules). |
 
 ## Running single tasks
 

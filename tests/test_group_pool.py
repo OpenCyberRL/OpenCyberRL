@@ -359,3 +359,44 @@ def test_run_group_rejects_nonpositive_capacity():
     with pytest.raises(ValueError, match="capacity"):
         run_group([_task("t")], _win, episodes=1, backend=CountingBackend(),
                   capacity=0)
+
+
+def test_on_error_fires_once_per_task_under_concurrency():
+    # Episodes already in flight when a task first fails must not each call
+    # on_error — the first failure claims the report; the rest are collateral.
+    # A barrier holds every episode inside _play at once, so all four reach
+    # the failure path concurrently (timing alone might serialize them).
+    be = CountingBackend()
+    reports = []
+    gate = threading.Barrier(4)
+
+    def boom(messages, tools):
+        gate.wait(timeout=10)
+        raise RuntimeError("model exploded")
+
+    def on_error(task, exc):
+        reports.append(task.name)
+
+    results = run_group([_task("t")], boom, episodes=4, concurrency=4,
+                        backend=be, on_error=on_error)
+
+    assert reports == ["t"]             # exactly one report for the task
+    assert results == [None] * 4        # every episode failed
+    assert _torn_down(be) == _brought_up(be)
+
+
+def test_raising_on_error_is_fatal_and_surfaces():
+    # A broken on_error must not die silently inside a worker: the error
+    # surfaces from run_group and every live world is still torn down.
+    be = CountingBackend()
+
+    def boom(messages, tools):
+        raise RuntimeError("model exploded")
+
+    def bad_on_error(task, exc):
+        raise ValueError("callback broke")
+
+    with pytest.raises(ValueError, match="callback broke"):
+        run_group([_task("t")], boom, episodes=2, concurrency=1,
+                  backend=be, on_error=bad_on_error)
+    assert _torn_down(be) == _brought_up(be)

@@ -417,14 +417,29 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
     pool = GroupPool(resolved, capacity or size)
     lock = threading.Lock()
     failed: set[int] = set()         # tolerant mode only: reported task ids
+    abort = threading.Event()        # first failure stops pending jobs
+    errors: list[BaseException] = []
 
     def _tolerated(task_obj, exc: BaseException) -> bool:
-        """Report `exc` for `task_obj` in tolerant mode; mark it dead."""
+        """Report `exc` for `task_obj` in tolerant mode; mark it dead.
+
+        The first failure claims the report (marking the task dead before
+        calling back), so concurrent episodes of an already-failing task see
+        it dead and fail silently: on_error fires exactly once per task. A
+        callback that raises is fatal — recorded and re-raised by run_group
+        — never swallowed or allowed to kill a worker mid-report.
+        """
         if on_error is None:
             return False
         with lock:
-            on_error(task_obj, exc)
+            if id(task_obj) in failed:
+                return True          # collateral of an already-reported failure
             failed.add(id(task_obj))
+            try:
+                on_error(task_obj, exc)
+            except BaseException as cb_err:
+                errors.append(cb_err)
+                abort.set()
         return True
 
     # Validate reset hooks + load specs before prebuild; dict dedupes tasks.
@@ -448,8 +463,6 @@ def run_group(tasks, model=None, *, model_factory=None, episodes: int = 1,
     jobs_q: "Queue[int]" = Queue()
     for i in range(len(jobs)):
         jobs_q.put(i)
-    abort = threading.Event()          # first failure stops pending jobs
-    errors: list[BaseException] = []
 
     def worker() -> None:
         while not abort.is_set():

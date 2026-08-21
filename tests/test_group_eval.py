@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -188,6 +187,20 @@ def test_jsonl_carries_one_rollout_per_episode_with_stage_breakdown(tmp_path):
     assert all(l["reward"] == pytest.approx(0.75) for l in lines)
     assert all("transcript" in l and "caps" in l for l in lines)
     assert len(result.rollouts) == 2             # the result mirrors the file
+
+
+def test_cli_run_resolves_all_groups_before_running(monkeypatch, capsys, tmp_path):
+    # A later unresolvable expression must fail BEFORE any rollouts run —
+    # never after, discarding the earlier group's expensive results.
+    _write_task(Path("."), "solo")
+    _fake_openai(monkeypatch)
+    out = tmp_path / "r.jsonl"
+
+    rc = cli.main(["run", "solo", "nope/level9", "--model", "m", "-o", str(out)])
+
+    assert rc == 2
+    assert "unknown" in capsys.readouterr().out
+    assert not out.exists()          # nothing ran, nothing written
 
 
 def test_jsonl_submission_order_survives_out_of_order_completion(tmp_path):

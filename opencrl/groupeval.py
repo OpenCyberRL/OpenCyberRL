@@ -20,7 +20,7 @@ from opencrl.groups import GroupExpr, TaskIndex, resolve_group
 from opencrl.rollout import Rollout
 from opencrl.runner import run_group
 from opencrl.task import get_task
-from opencrl.warm import _reason, build_index
+from opencrl.warm import build_index
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,12 @@ class TaskOutcome:
     task: str
     rollouts: list[Rollout]      # successful episodes, in submission order
     error: str | None = None     # first failure; None when every episode ran
+
+
+def _reason(exc: BaseException, limit: int = 200) -> str:
+    """Collapse an exception's message to one bounded line."""
+    text = " ".join(str(exc).split())
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 @dataclass(frozen=True)
