@@ -9,6 +9,6 @@ def test_public_surface_imports():
         "register_backend", "resolve_backend",
         "get_task", "list_tasks", "discover",
         "to_trl", "to_verl", "export_rollouts",
-        "run_batch", "to_gym_vector",
+        "run_batch", "run_group", "GroupPool", "to_gym_vector",
     ]:
         assert hasattr(opencrl, name), f"missing public export: {name}"
